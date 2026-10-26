@@ -3,6 +3,8 @@ const crypto = require('node:crypto');
 const { ensureCharacter } = require('./ensure-character.js');
 const { withFileLock } = require('./file-lock.js');
 
+const { normalizeForComparison } = require('./normalize-memory-text.js');
+
 const validId = /^[a-zA-Z0-9_-]{1,64}$/;
 
 function saveUserMemory(userId, characterId, text) {
@@ -25,6 +27,7 @@ function saveUserMemory(userId, characterId, text) {
 
     const file = ensureCharacter(userId, characterId);
     const content = text.trim();
+    const comparableContent = normalizeForComparison(content);
 
     return withFileLock(file, () => {
         const data = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -36,14 +39,17 @@ function saveUserMemory(userId, characterId, text) {
             throw new Error('記憶データの形式が不正です');
         }
 
-        if (data.memories.some(item => item.text === content)) {
+        if (data.memories.some(item =>
+            typeof item.text === 'string' &&
+            normalizeForComparison(item.text) === comparableContent,
+        )) {
             return { saved: false, reason: 'duplicate' };
         }
 
         data.memories.push({
             id: crypto.randomUUID(),
             text: content,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
         });
 
         const tempFile = file + '.' + crypto.randomUUID() + '.tmp';
@@ -52,7 +58,7 @@ function saveUserMemory(userId, characterId, text) {
             fs.writeFileSync(
                 tempFile,
                 JSON.stringify(data, null, 2) + '\n',
-                { flag: 'wx', mode: 0o600 }
+                { flag: 'wx', mode: 0o600 },
             );
             fs.renameSync(tempFile, file);
         } finally {
