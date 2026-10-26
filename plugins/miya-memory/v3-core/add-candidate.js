@@ -6,6 +6,10 @@ const { withFileLock } = require('./file-lock.js');
 
 const validId = /^[a-zA-Z0-9_-]{1,64}$/;
 
+function normalizeForComparison(text) {
+    return text.normalize('NFKC').replace(/\s+/gu, ' ').trim();
+}
+
 function addCandidate(userId, characterId, text, reason = '') {
     if (
         typeof userId !== 'string' || !validId.test(userId) ||
@@ -17,6 +21,7 @@ function addCandidate(userId, characterId, text, reason = '') {
     }
 
     const content = text.trim();
+    const comparableContent = normalizeForComparison(content);
     const { pendingFile } = ensureDecisions(userId);
     const memoryFile = ensureCharacter(userId, characterId);
 
@@ -36,7 +41,7 @@ function addCandidate(userId, characterId, text, reason = '') {
         const duplicateCandidate = pendingData.pending.find(item =>
             item.characterId === characterId &&
             typeof item.text === 'string' &&
-            item.text.trim() === content &&
+            normalizeForComparison(item.text) === comparableContent &&
             item.status === 'pending'
         );
 
@@ -62,7 +67,7 @@ function addCandidate(userId, characterId, text, reason = '') {
 
             if (memoryData.memories.some(item =>
                 typeof item.text === 'string' &&
-                item.text === content
+                normalizeForComparison(item.text) === comparableContent
             )) {
                 return {
                     saved: false,

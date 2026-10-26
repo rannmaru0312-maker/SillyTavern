@@ -63,6 +63,24 @@ describe('MIYA memory v3 core', () => {
         expect(readDecisions('fictional_user').pending).toContainEqual(candidate);
     });
 
+    test('does not add a normalized duplicate candidate', () => {
+        const candidate = addCandidate('fictional_user', 'fictional_character', 'Likes tea');
+
+        expect(addCandidate('fictional_user', 'fictional_character', '  Ｌｉｋｅｓ   tea  ')).toEqual({
+            saved: false,
+            reason: 'duplicate-candidate',
+            candidate,
+        });
+        expect(readDecisions('fictional_user').pending).toEqual([candidate]);
+    });
+
+    test('allows the same candidate for a different character', () => {
+        addCandidate('fictional_user', 'fictional_character_a', 'Likes tea');
+
+        expect(addCandidate('fictional_user', 'fictional_character_b', 'Likes tea')).toHaveProperty('status', 'pending');
+        expect(readDecisions('fictional_user').pending).toHaveLength(2);
+    });
+
     test('holding a candidate does not save it to long-term memory', () => {
         const candidate = addCandidate('fictional_user', 'fictional_character', 'Likes tea');
 
