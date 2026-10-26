@@ -1,46 +1,36 @@
 name: MIYA AI Development Check
-
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - miya-ai-dev
   pull_request:
-    branches:
-      - miya-ai-dev
-
+    branches: [miya-ai-dev]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 permissions:
   contents: read
-
+concurrency:
+  group: miya-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 15
     steps:
-      - name: Checkout development code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          node-version: 20
-
-      - name: Check development rules
-        run: test -s docs/AI_DEVELOPMENT_RULES.md
-
-      - name: Check JavaScript syntax
-        run: |
-          node --check public/script.js
-          node --check public/scripts/welcome-screen.js
-
-      - name: Install memory test dependencies
-        run: npm ci --ignore-scripts
-        working-directory: tests
-
-      - name: Run MIYA memory v3 core tests
-        run: npm run test:unit -- --runTestsByPath miya-memory-v3-core.test.js
-        working-directory: tests
-
-      - name: Report success
-        run: echo "MIYA AI development checks and memory tests passed"
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e
+        with:
+          node-version: 24
+      - name: Check development scope and credential patterns
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/miya/check-development.mjs "$BASE_SHA" "$HEAD_SHA"
+      - run: npm ci --ignore-scripts
+      - run: npm --prefix tests ci --ignore-scripts
+      - name: Lint changed JavaScript including ignored plugins
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/miya/check-development.mjs "$BASE_SHA" "$HEAD_SHA" --lint
+      - name: Run Jest serially
+        run: npm --prefix tests run test:unit -- --runInBand
