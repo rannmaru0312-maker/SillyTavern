@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - miya-ai-dev
+  pull_request:
+    branches:
+      - miya-ai-dev
 
 permissions:
   contents: read
@@ -18,6 +21,11 @@ jobs:
       - name: Checkout development code
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Check development rules
         run: test -s docs/AI_DEVELOPMENT_RULES.md
 
@@ -26,5 +34,13 @@ jobs:
           node --check public/script.js
           node --check public/scripts/welcome-screen.js
 
+      - name: Install memory test dependencies
+        run: npm ci --ignore-scripts
+        working-directory: tests
+
+      - name: Run MIYA memory v3 core tests
+        run: npm run test:unit -- --runTestsByPath miya-memory-v3-core.test.js
+        working-directory: tests
+
       - name: Report success
-        run: echo "MIYA AI development checks passed"
+        run: echo "MIYA AI development checks and memory tests passed"
