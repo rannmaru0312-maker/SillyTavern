@@ -1,0 +1,30 @@
+name: MIYA AI Development Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - miya-ai-dev
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout development code
+        uses: actions/checkout@v4
+
+      - name: Check development rules
+        run: test -s docs/AI_DEVELOPMENT_RULES.md
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check public/script.js
+          node --check public/scripts/welcome-screen.js
+
+      - name: Report success
+        run: echo "MIYA AI development checks passed"
