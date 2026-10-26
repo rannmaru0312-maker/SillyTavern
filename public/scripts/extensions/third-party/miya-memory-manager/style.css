@@ -1,0 +1,253 @@
+#miya-memory-panel {
+    position: fixed;
+    right: 8px;
+    top: 80px;
+    bottom: auto;
+    width: 200px;
+    max-width: calc(100vw - 40px);
+    padding: 10px;
+    background: #263238;
+    color: #ffffff;
+    border: 1px solid #607d8b;
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    font-family: sans-serif;
+}
+
+#miya-memory-panel h3 {
+    margin: 0 0 10px;
+    font-size: 12px;
+}
+
+#miya-memory-panel p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+}
+/* 記憶管理ボタンを見やすくする */
+#miya-memory-panel button {
+    padding: 6px 10px;
+    margin: 5px 4px 4px 0;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    color: #ffffff;
+}
+
+/* 承認ボタン：緑 */
+#miya-memory-panel button:first-of-type {
+    background-color: #2e7d32;
+}
+
+/* 保留ボタン：オレンジ */
+#miya-memory-panel button:nth-of-type(2) {
+    background-color: #e65100;
+}
+
+/* 押した後のボタン */
+#miya-memory-panel button:disabled {
+    background-color: #607d8b;
+    color: #ffffff;
+    cursor: default;
+    opacity: 0.8;
+}
+
+/* 記憶一覧の間隔 */
+#miya-memory-panel li {
+    margin-bottom: 14px;
+    line-height: 1.6;
+}
+
+/* 記憶管理ウィンドウ内の中央揃え */
+#miya-memory-panel {
+    text-align: center;
+}
+
+#miya-memory-panel ul {
+    list-style: none;
+    padding-left: 0;
+    margin: 10px 0;
+}
+
+#miya-memory-panel li {
+    text-align: center;
+}
+
+#miya-memory-panel li button {
+    display: inline-block;
+    margin: 6px 4px;
+}
+
+/* パソコン版：ウィンドウのサイズ変更 */
+@media (min-width: 769px) {
+    #miya-memory-panel {
+        width: 280px;
+        min-width: 220px;
+        min-height: 100px;
+        max-height: calc(100dvh - 100px);
+        resize: both;
+        overflow: auto;
+        box-sizing: border-box;
+    }
+}
+
+/* スマホ版：画面幅に合わせて表示 */
+@media (max-width: 768px) {
+    #miya-memory-panel {
+        position: fixed;
+        left: auto;
+        right: 10px;
+        top: 70px;
+        bottom: auto;
+        width: min(280px, calc(100vw - 20px)) !important;
+        max-width: none;
+        max-height: calc(100dvh - 85px);
+        overflow: auto;
+        resize: none;
+        box-sizing: border-box;
+    }
+
+    #miya-memory-panel button {
+        min-height: 44px;
+        margin: 5px;
+    }
+
+    #miya-memory-panel h3 {
+        cursor: move !important;
+        touch-action: none !important;
+    }
+}
+
+/* 記憶候補一覧：通常は約3件分を表示 */
+#miya-memory-panel-content ul {
+    max-height: min(340px, 48dvh);
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    padding-right: 4px;
+}
+
+/* 4件以上ある場合は下向き矢印でスクロールを案内 */
+#miya-memory-panel-content:has(ul > li:nth-child(4))::after {
+    content: "↓ スクロールして続きを表示";
+    display: block;
+    text-align: center;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 8px 0 4px;
+    color: #b3e5fc;
+}
+
+/* キャラクター編集画面だけをネイビーブルーにする */
+#rm_ch_create_block {
+    background-color: #263b49;
+    border-radius: 10px;
+    padding: 10px;
+}
+
+/* キャラクター説明と最初のメッセージをコンパクトにする */
+#rm_ch_create_block #descriptionWrapper,
+#rm_ch_create_block #firstMessageWrapper {
+    flex: 0 0 auto;
+}
+
+#rm_ch_create_block #description_textarea,
+#rm_ch_create_block #firstmessage_textarea {
+    height: 150px !important;
+    min-height: 120px;
+    overflow-y: auto;
+    resize: vertical;
+}
+
+
+/* MIYA_INLINE_MEMORY_LAYOUT: バナー下の折りたたみ表示 */
+#miya-memory-panel.miya-inline {
+    position: relative !important;
+    inset: auto !important;
+    left: auto !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    resize: none !important;
+    overflow: visible !important;
+    box-sizing: border-box;
+    margin: 0 0 12px;
+    padding: 6px;
+    box-shadow: none;
+    text-align: left;
+}
+
+#miya-memory-panel.miya-inline > h3,
+#miya-memory-panel.miya-inline > button:nth-of-type(2) {
+    display: none !important;
+}
+
+#miya-memory-panel.miya-inline > button:first-of-type {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 12px;
+    text-align: left;
+    background: #365467;
+    color: white;
+    border-radius: 7px;
+}
+
+#miya-memory-panel.miya-inline #miya-memory-panel-content {
+    margin-top: 8px;
+    padding: 4px 8px;
+}
+
+
+/* MIYA_COMPACT_RIGHT_MEMORY: バナー下の右端にコンパクト配置 */
+#miya-memory-panel.miya-inline {
+    width: min(250px, 100%) !important;
+    margin: 0 0 10px auto !important;
+    padding: 4px !important;
+    text-align: right;
+}
+
+/* 閉じたときはボタンだけの大きさ */
+#miya-memory-panel.miya-inline:has(#miya-memory-panel-content[hidden]) {
+    width: max-content !important;
+    max-width: 100% !important;
+}
+
+#miya-memory-panel.miya-inline > button:first-of-type {
+    width: auto !important;
+    min-height: 0 !important;
+    padding: 7px 11px !important;
+    margin: 0 !important;
+    font-size: 12px !important;
+    line-height: 1.3;
+    text-align: center;
+}
+
+#miya-memory-panel.miya-inline #miya-memory-panel-content {
+    text-align: center;
+}
+
+/* MIYA_COMPACT_RETURN_BUTTON */
+#rm_ch_create_block #miya-return-to-chat {
+    display: block !important;
+    width: fit-content !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin: 8px 0 10px auto !important;
+    padding: 7px 11px !important;
+    font-size: 12px !important;
+    line-height: 1.3 !important;
+    text-align: center !important;
+    background: #365467 !important;
+    border-radius: 7px !important;
+}

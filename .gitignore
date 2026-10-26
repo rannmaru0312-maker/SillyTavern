@@ -59,3 +59,7 @@ public/scripts/extensions/third-party
 yarn.lock
 *.code-workspace
 test-results/
+
+# MIYA & KOHARU 開発用データ保護
+/plugins/miya-memory/runtime-data/
+/plugins/miya-memory/**/*.bak*
