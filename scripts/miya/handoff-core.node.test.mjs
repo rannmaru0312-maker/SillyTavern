@@ -102,3 +102,11 @@ test('provides safe review state transitions', () => {
     assert.deepEqual(allowedNextStates('done'), []);
     assert.throws(() => allowedNextStates('automatically-merged'), /Unknown handoff state/);
 });
+
+test('rejects coercible array ID and SHA values', () => {
+    unsafe(item => { item.id = ['MIYA-AUTO-001']; });
+    unsafe(item => { item.source.headSha = ['e99ea1dd3f66a114efda6ae38e668028522e473e']; });
+});
+test('rejects unsafe integer PR numbers', () => unsafe(item => {
+    item.source.prNumber = Number.MAX_SAFE_INTEGER + 1;
+}));
