@@ -27,6 +27,10 @@ export function evaluateLoop(input) {
     if (!review || review.headSha !== headSha || review.status !== 'completed') return stop('waiting-review', 'review-incomplete');
     if (review.unresolvedFindings !== false) return stop('blocked', 'unresolved-findings');
     if (activeJobs !== 0) return stop('waiting-agent', 'agent-already-active');
+    // Missing history is not equivalent to confirmed empty history.
+    if (lastDispatchedSha !== null && (typeof lastDispatchedSha !== 'string' || !SHA.test(lastDispatchedSha))) {
+        return stop('blocked', 'invalid-dispatch-history');
+    }
     if (lastDispatchedSha === headSha) return stop('blocked', 'duplicate-dispatch');
     if (!provider || provider.connected !== true || provider.includedUsageConfirmed !== true || provider.canLaunchUnattended !== true) {
         return stop('blocked', 'codex-dispatch-unverified');
