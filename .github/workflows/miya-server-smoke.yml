@@ -1,0 +1,51 @@
+name: MIYA isolated server boot smoke test
+
+on:
+  pull_request:
+    branches: [miya-ai-dev]
+    paths:
+      - '.github/workflows/miya-server-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-server-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      NODE_ENV: development
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e
+        with:
+          node-version: '24'
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Boot isolated local server and verify HTTP response
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$RUNNER_TEMP/miya-smoke"
+          node server.js --port 8000 --dataRoot "$RUNNER_TEMP/miya-smoke" >"$RUNNER_TEMP/miya-smoke.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT
+          passed=0
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error --max-time 2 --output /dev/null http://127.0.0.1:8000/ 2>/dev/null; then
+              passed=1
+              echo "MIYA_SMOKE_SERVER_HTTP_SUCCESS"
+              break
+            fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "Server process terminated"
+              break
+            fi
+            sleep 2
+          done
+          if [ "$passed" -ne 1 ]; then
+            echo "MIYA_SMOKE_SERVER_HTTP_FAILED"
+            tail -n 80 "$RUNNER_TEMP/miya-smoke.log" | sed -E 's/(api[_-]?key|token|password|secret)[=:][^ ]+/\\1=[REDACTED]/Ig'
+            exit 1
+          fi
