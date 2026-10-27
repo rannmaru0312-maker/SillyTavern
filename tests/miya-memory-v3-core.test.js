@@ -139,13 +139,17 @@ describe('MIYA memory v3 core', () => {
             expect(addCandidate('fictional_user', 'fictional_character', `Fictional memory ${index}`)).toHaveProperty('status', 'pending');
         }
 
-        expect(addCandidate('fictional_user', 'fictional_character', 'Fictional memory overflow')).toEqual({
+        const beforeOverflow = readDecisions('fictional_user').pending;
+        expect(addCandidate('fictional_user', 'fictional_other_character', 'Fictional memory overflow')).toEqual({
             saved: false,
             reason: 'pending-limit',
             limit: 100,
             pendingCount: 100,
         });
-        expect(readDecisions('fictional_user').pending).toHaveLength(100);
+        expect(readDecisions('fictional_user').pending).toEqual(beforeOverflow);
+        expect(addCandidate('fictional_other_user', 'fictional_character', 'Independent fictional candidate')).toHaveProperty('status', 'pending');
+        expect(readDecisions('fictional_other_user').pending).toHaveLength(1);
+        expect(readMemories('fictional_user', 'fictional_other_character').memories).toEqual([]);
         expect(readMemories('fictional_user', 'fictional_character').memories).toEqual([]);
     });
 });
