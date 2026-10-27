@@ -6,6 +6,8 @@ on:
     paths:
       - 'scripts/miya/continuous-loop-policy.mjs'
       - 'scripts/miya/continuous-loop-policy.node.test.mjs'
+      - 'scripts/miya/codex-github-dispatch.mjs'
+      - 'scripts/miya/codex-github-dispatch.node.test.mjs'
       - '.github/workflows/miya-continuous-loop-policy.yml'
 
 permissions:
@@ -25,4 +27,4 @@ jobs:
       - name: Check pure-loop policy syntax
         run: node --check scripts/miya/continuous-loop-policy.mjs
       - name: Run pure-loop policy security tests
-        run: node --test scripts/miya/continuous-loop-policy.node.test.mjs
+        run: node --test scripts/miya/continuous-loop-policy.node.test.mjs scripts/miya/codex-github-dispatch.node.test.mjs
