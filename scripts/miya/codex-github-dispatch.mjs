@@ -1,4 +1,5 @@
 import { evaluateLoop } from './continuous-loop-policy.mjs';
+import { evaluateHumanHandoff } from './human-approval-gate.mjs';
 
 // Adapter for the existing GitHub PR-comment Codex integration.
 // The caller submits the prepared text using an authenticated GitHub connector.
@@ -9,9 +10,23 @@ const TASKS = Object.freeze({
     'fix-test-isolation': 'Fix the approved test isolation regression in this development PR.',
     'add-regression-tests': 'Add isolated regression tests for the approved development change.',
 });
-export function prepareCodexComment({ gate, sourcePr, taskId, workBranch }) {
+export function prepareCodexComment({ gate, sourcePr, taskId, workBranch, humanApproval } = {}) {
     const result = evaluateLoop(gate);
     if (!result.mayDispatch) return { ok: false, reason: result.reason };
+    // This mandatory gate applies to EVERY path that prepares a Codex command.
+    // Only exact SHA-matched, authenticated human approval permits preparation.
+    const human = evaluateHumanHandoff({
+        sourcePr,
+        sourceSha: gate.headSha,
+        checksPassed: true, // Proven by evaluateLoop above (exact-SHA checks).
+        reviewPassed: true, // Proven by evaluateLoop above (exact-SHA review).
+        approval: humanApproval,
+        targetBranch: gate.baseBranch,
+        paidBudgetUsd: gate.paidBudgetUsd,
+        allowProduction: gate.productionAccess,
+        autoMerge: gate.autoMerge,
+    });
+    if (!human.approvedForNextTask) return { ok: false, reason: human.reason };
     if (!Number.isSafeInteger(sourcePr) || sourcePr < 1
         || typeof workBranch !== 'string' || !/^miya-ai-[a-z0-9-]{1,60}$/.test(workBranch)
         || typeof taskId !== 'string' || !Object.hasOwn(TASKS, taskId)) {
@@ -20,6 +35,8 @@ export function prepareCodexComment({ gate, sourcePr, taskId, workBranch }) {
     return {
         ok: true,
         prNumber: sourcePr,
+        approvalCommentId: humanApproval.commentId,
+        delivery: 'manual-only',
         idempotencyKey: `codex:${sourcePr}:${gate.headSha}`,
         comment: `@codex ${TASKS[taskId]}\n\nMIYA handoff: source PR #${sourcePr}, verified SHA ${gate.headSha}, target branch ${workBranch}. Development changes only; no merge, deployment, release modification, secrets, paid usage, or production access. On environment or quota failure report the blocker without retrying.`,
     };
