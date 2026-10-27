@@ -7,9 +7,9 @@ const SHA = /^[a-f0-9]{40}$/;
 const REQUIRED = ['MIYA AI Development Check', '✅ Pull Request Checks'];
 const stop = (phase, reason) => ({ phase, reason, mayDispatch: false });
 
-export function evaluateLoop(input) {
+function inspectCore(input) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) return stop('blocked', 'invalid-input');
-    const { baseBranch, headSha, checks, review, provider, activeJobs, lastDispatchedSha, paidBudgetUsd, productionAccess, autoMerge } = input;
+    const { baseBranch, headSha, checks, review, activeJobs, lastDispatchedSha, paidBudgetUsd, productionAccess, autoMerge } = input;
     if (baseBranch !== 'miya-ai-dev' || typeof headSha !== 'string' || !SHA.test(headSha)) {
         return stop('blocked', 'invalid-target');
     }
@@ -32,8 +32,31 @@ export function evaluateLoop(input) {
         return stop('blocked', 'invalid-dispatch-history');
     }
     if (lastDispatchedSha === headSha) return stop('blocked', 'duplicate-dispatch');
+    return { phase: 'verified', reason: 'ci-review-and-history-verified', mayDispatch: false };
+}
+
+export function evaluateLoop(input) {
+    const verified = inspectCore(input);
+    if (verified.phase !== 'verified') return verified;
+    const provider = input.provider;
     if (!provider || provider.connected !== true || provider.includedUsageConfirmed !== true || provider.canLaunchUnattended !== true) {
         return stop('blocked', 'codex-dispatch-unverified');
     }
     return { phase: 'ready-for-dispatch', reason: 'gates-passed', mayDispatch: true };
+}
+
+/**
+ * Manual handoff is preparation ONLY: it cannot dispatch to Codex.
+ * It uses the same CI, review, branch, history and cost guards, but it does
+ * not require an unattended-launch provider connection.
+ */
+export function evaluateManualReadiness(input) {
+    const verified = inspectCore(input);
+    if (verified.phase !== 'verified') return { ...verified, mayPrepareManual: false };
+    return {
+        phase: 'ready-for-manual-preparation',
+        reason: 'human-approval-still-required',
+        mayDispatch: false,
+        mayPrepareManual: true,
+    };
 }
