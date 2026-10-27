@@ -1,4 +1,4 @@
-import { evaluateLoop } from './continuous-loop-policy.mjs';
+import { evaluateLoop, evaluateManualReadiness } from './continuous-loop-policy.mjs';
 import { evaluateHumanHandoff } from './human-approval-gate.mjs';
 
 // Adapter for the existing GitHub PR-comment Codex integration.
@@ -39,6 +39,49 @@ export function prepareCodexComment({ gate, sourcePr, taskId, workBranch, humanA
         delivery: 'manual-only',
         idempotencyKey: `codex:${sourcePr}:${gate.headSha}`,
         comment: `@codex ${TASKS[taskId]}\n\nMIYA handoff: source PR #${sourcePr}, verified SHA ${gate.headSha}, target branch ${workBranch}. Development changes only; no merge, deployment, release modification, secrets, paid usage, or production access. On environment or quota failure report the blocker without retrying.`,
+    };
+}
+
+
+/**
+ * After verified human approval, prepare a prompt for manual Codex Cloud entry.
+ * No GitHub comment is posted and no provider/API call is made.
+ */
+export function prepareManualCodexTask({ gate, sourcePr, taskId, workBranch, humanApproval } = {}) {
+    const result = evaluateManualReadiness(gate);
+    if (!result.mayPrepareManual) return { ok: false, reason: result.reason };
+    if (!Number.isSafeInteger(sourcePr) || sourcePr < 1
+        || typeof workBranch !== 'string' || !/^miya-ai-[a-z0-9-]{1,60}$/.test(workBranch)
+        || typeof taskId !== 'string' || !Object.hasOwn(TASKS, taskId)) {
+        return { ok: false, reason: 'invalid-dispatch-input' };
+    }
+    const human = evaluateHumanHandoff({
+        sourcePr,
+        sourceSha: gate.headSha,
+        checksPassed: true,
+        reviewPassed: true,
+        approval: humanApproval,
+        targetBranch: gate.baseBranch,
+        paidBudgetUsd: gate.paidBudgetUsd,
+        allowProduction: gate.productionAccess,
+        autoMerge: gate.autoMerge,
+    });
+    if (!human.approvedForNextTask) return { ok: false, reason: human.reason };
+    return {
+        ok: true,
+        delivery: 'manual-cloud-ui-only',
+        taskLaunchAuthorized: false,
+        approvalCommentId: humanApproval.commentId,
+        sourceSha: gate.headSha,
+        sourcePr,
+        taskId,
+        prompt: TASKS[taskId]
+            + '\n\nRepository: rannmaru0312-maker/SillyTavern'
+            + '\nSource PR: #' + sourcePr
+            + '\nVerified source commit: ' + gate.headSha
+            + '\nPrepare development branch: ' + workBranch + ' from miya-ai-dev.'
+            + '\nCreate a Draft PR only. Run tests and request code review.'
+            + '\nNever merge, deploy, modify release/production, access secrets or real user data, or start paid API usage.',
     };
 }
 
