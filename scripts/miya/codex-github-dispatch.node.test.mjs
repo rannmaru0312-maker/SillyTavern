@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { prepareCodexComment, classifyCodexReply } from './codex-github-dispatch.mjs';
+import { prepareCodexComment, prepareManualCodexTask, classifyCodexReply } from './codex-github-dispatch.mjs';
 import { approvalCommand } from './human-approval-gate.mjs';
 
 const sha = 'a'.repeat(40);
@@ -133,4 +133,44 @@ test('review findings cannot be bypassed by human approval', () => {
     const req = request();
     req.gate.review.unresolvedFindings = true;
     assert.equal(prepareCodexComment(req).reason, 'unresolved-findings');
+});
+
+test('approved human can prepare a manual Cloud task even when unattended integration is unavailable', () => {
+    const req = request();
+    req.gate.provider.canLaunchUnattended = false;
+    const result = prepareManualCodexTask(req);
+    assert.equal(result.ok, true);
+    assert.equal(result.delivery, 'manual-cloud-ui-only');
+    assert.equal(result.taskLaunchAuthorized, false);
+    assert.match(result.prompt, /Create a Draft PR only/);
+    assert.doesNotMatch(result.prompt, /@codex/);
+});
+test('manual Cloud task is never prepared without human approval', () => {
+    const req = request();
+    delete req.humanApproval;
+    assert.deepEqual(prepareManualCodexTask(req), { ok: false, reason: 'human-approval-required' });
+});
+test('manual Cloud task rejects stale approvals and untrusted authors', () => {
+    const req = request();
+    req.humanApproval.sourceSha = 'b'.repeat(40);
+    assert.equal(prepareManualCodexTask(req).ok, false);
+    req.humanApproval.sourceSha = sha;
+    req.humanApproval.actor = 'not-owner';
+    assert.equal(prepareManualCodexTask(req).ok, false);
+});
+test('manual Cloud task cannot bypass failed CI or review', () => {
+    const req = request();
+    req.gate.checks[0].conclusion = 'failure';
+    assert.equal(prepareManualCodexTask(req).ok, false);
+    req.gate.checks[0].conclusion = 'success';
+    req.gate.review.unresolvedFindings = true;
+    assert.equal(prepareManualCodexTask(req).ok, false);
+});
+test('manual Cloud task cannot bypass cost and branch policies', () => {
+    const req = request();
+    req.gate.baseBranch = 'release';
+    assert.equal(prepareManualCodexTask(req).ok, false);
+    req.gate.baseBranch = 'miya-ai-dev';
+    req.gate.paidBudgetUsd = 1;
+    assert.equal(prepareManualCodexTask(req).ok, false);
 });
