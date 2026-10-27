@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "repository": "rannmaru0312-maker/SillyTavern",
+  "policy": {
+    "baseBranch": "miya-ai-dev",
+    "forbiddenBranches": ["release"],
+    "maxConcurrentTasks": 1,
+    "maxAutomaticIterations": 0,
+    "maxPaidSpendUsd": 0,
+    "agentDispatchEnabled": false,
+    "automaticIssueAssignmentEnabled": false,
+    "automaticMergeEnabled": false,
+    "deploymentEnabled": false,
+    "productionDataAccessEnabled": false,
+    "newProviderRequiresApproval": true
+  },
+  "agents": [
+    {
+      "id": "github-copilot",
+      "description": "GitHub Copilot: proposed implementation and test work",
+      "capabilities": ["implementation", "testing"],
+      "priority": 10,
+      "integrationStatus": "not-verified",
+      "costStatus": "unknown"
+    },
+    {
+      "id": "chatgpt-work",
+      "description": "ChatGPT Work: proposed investigation, review and documentation work",
+      "capabilities": ["planning", "review", "security", "documentation"],
+      "priority": 20,
+      "integrationStatus": "not-verified",
+      "costStatus": "unknown"
+    },
+    {
+      "id": "specialist-candidate",
+      "description": "Placeholder for a future approved specialist; no provider is selected",
+      "capabilities": ["security", "testing", "audio"],
+      "priority": 90,
+      "integrationStatus": "not-verified",
+      "costStatus": "unknown"
+    }
+  ]
+}
