@@ -1,0 +1,48 @@
+name: MIYA Safe Handoff Validation
+on:
+  pull_request:
+    branches: [miya-ai-dev]
+    types: [opened, reopened, synchronize, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout development code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check JavaScript syntax
+        run: |
+          node --check scripts/miya/handoff-core.mjs
+          node --check scripts/miya/handoff-cli.mjs
+          node --check scripts/miya/agent-dispatch-readiness.mjs
+      - name: Install lint dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: ESLint handoff module, CLI and Node tests
+        run: |
+          ./node_modules/.bin/eslint --env node --parser-options '{"sourceType":"module","ecmaVersion":"latest"}' \
+            scripts/miya/handoff-core.mjs \
+            scripts/miya/handoff-cli.mjs \
+            scripts/miya/handoff-core.node.test.mjs \
+            scripts/miya/agent-dispatch-readiness.mjs \
+            scripts/miya/agent-dispatch-readiness.node.test.mjs
+      - name: Validate machine-readable handoff tickets
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tickets=(.github/miya/handoffs/MIYA-AUTO-*.json)
+          if (( ${#tickets[@]} == 0 )); then
+            echo 'No handoff files in this PR; nothing to validate.'
+          else
+            node scripts/miya/handoff-cli.mjs "${tickets[@]}"
+          fi
+      - name: Unit tests for handoff policy
+        run: node --test scripts/miya/handoff-core.node.test.mjs scripts/miya/agent-dispatch-readiness.node.test.mjs

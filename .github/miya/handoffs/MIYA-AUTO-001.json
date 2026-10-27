@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "MIYA-AUTO-001",
+  "repository": "rannmaru0312-maker/SillyTavern",
+  "baseBranch": "miya-ai-dev",
+  "title": "Validate the AI planner and review the next safe handoff",
+  "kind": "security-review",
+  "priority": 100,
+  "source": {
+    "prNumber": 4,
+    "headSha": "e99ea1dd3f66a114efda6ae38e668028522e473e"
+  },
+  "handoff": {
+    "from": "miya-planner",
+    "to": "work-reviewer"
+  },
+  "state": "ready",
+  "dependsOn": [],
+  "acceptance": [
+    "Confirm PR #4 CI success at the exact source head SHA.",
+    "Review fail-closed policy, privacy and unknown-provider safety gates.",
+    "Record findings in a draft PR or review report, never merge or deploy."
+  ],
+  "gates": {
+    "agentDispatchEnabled": false,
+    "paidBudgetUsd": 0,
+    "productionAccessEnabled": false,
+    "autoMergeEnabled": false,
+    "humanApprovalRequired": true
+  }
+}
