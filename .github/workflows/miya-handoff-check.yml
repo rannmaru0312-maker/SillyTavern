@@ -3,7 +3,6 @@ on:
   pull_request:
     branches: [miya-ai-dev]
     types: [opened, reopened, synchronize, ready_for_review]
-  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -23,6 +22,14 @@ jobs:
         run: |
           node --check scripts/miya/handoff-core.mjs
           node --check scripts/miya/handoff-cli.mjs
+      - name: Install lint dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: ESLint handoff module, CLI and Node tests
+        run: |
+          ./node_modules/.bin/eslint --env node --parser-options '{"sourceType":"module","ecmaVersion":"latest"}' \
+            scripts/miya/handoff-core.mjs \
+            scripts/miya/handoff-cli.mjs \
+            scripts/miya/handoff-core.node.test.mjs
       - name: Validate machine-readable handoff tickets
         shell: bash
         run: |
