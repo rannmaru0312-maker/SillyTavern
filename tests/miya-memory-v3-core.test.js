@@ -106,6 +106,25 @@ describe('MIYA memory v3 core', () => {
         ]);
     });
 
+    test('keeps identical pending candidates separate across users and characters', () => {
+        const userACharA = addCandidate('fictional_user_a', 'fictional_character_a', 'Likes tea');
+        const userACharB = addCandidate('fictional_user_a', 'fictional_character_b', 'Likes tea');
+        const userBCharA = addCandidate('fictional_user_b', 'fictional_character_a', 'Likes tea');
+
+        expect(userACharA.status).toBe('pending');
+        expect(userACharB.status).toBe('pending');
+        expect(userBCharA.status).toBe('pending');
+        expect(readDecisions('fictional_user_a').pending).toHaveLength(2);
+        expect(readDecisions('fictional_user_b').pending).toHaveLength(1);
+
+        expect(saveDecision('fictional_user_a', userACharA.id, 'approve').saved).toBe(true);
+        expect(readMemories('fictional_user_a', 'fictional_character_a').memories.map(item => item.text)).toEqual(['Likes tea']);
+        expect(readMemories('fictional_user_a', 'fictional_character_b').memories).toEqual([]);
+        expect(readMemories('fictional_user_b', 'fictional_character_a').memories).toEqual([]);
+        expect(readDecisions('fictional_user_a').pending).toContainEqual(userACharB);
+        expect(readDecisions('fictional_user_b').pending).toContainEqual(userBCharA);
+    });
+
     test('does not allow another user to approve a candidate', () => {
         const candidate = addCandidate('fictional_owner', 'fictional_character', 'Likes tea');
 
