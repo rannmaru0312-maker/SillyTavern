@@ -27,13 +27,13 @@ export function validateHandoff(ticket) {
         || ticket.schemaVersion !== 1
         || ticket.repository !== 'rannmaru0312-maker/SillyTavern'
         || ticket.baseBranch !== 'miya-ai-dev'
-        || !idPattern.test(ticket.id)
+        || typeof ticket.id !== 'string' || !idPattern.test(ticket.id)
         || !safeText(ticket.title, 100)
         || !KINDS.has(ticket.kind)
         || !Number.isInteger(ticket.priority) || ticket.priority < 0 || ticket.priority > 100
         || !isRecord(ticket.source) || !exactKeys(ticket.source, ALLOWED_SOURCE)
-        || !Number.isInteger(ticket.source.prNumber) || ticket.source.prNumber < 1
-        || !shaPattern.test(ticket.source.headSha)
+        || !Number.isSafeInteger(ticket.source.prNumber) || ticket.source.prNumber < 1
+        || typeof ticket.source.headSha !== 'string' || !shaPattern.test(ticket.source.headSha)
         || !isRecord(ticket.handoff) || !exactKeys(ticket.handoff, ALLOWED_HANDOFF)
         || !ROLES.has(ticket.handoff.from) || !ROLES.has(ticket.handoff.to)
         || !STATES.has(ticket.state)
