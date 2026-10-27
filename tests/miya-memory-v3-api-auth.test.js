@@ -1,3 +1,4 @@
+/* eslint-disable playwright/no-standalone-expect -- Jest test.each callbacks are test blocks, not Playwright standalone assertions. */
 import { describe, expect, test } from '@jest/globals';
 import { createRequire } from 'node:module';
 
