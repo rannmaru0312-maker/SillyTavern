@@ -1,3 +1,5 @@
+/* Jest's test.each is not a Playwright test; avoid Playwright's false positive. */
+/* eslint playwright/no-standalone-expect: off */
 import { describe, expect, test } from '@jest/globals';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
