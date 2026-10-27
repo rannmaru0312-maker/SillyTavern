@@ -30,7 +30,7 @@ export function classifyCodexReply({ requestSha, currentSha, text }) {
         return { state: 'blocked', reason: 'stale-request' };
     }
     if (typeof text !== 'string' || text.length > 10000) return { state: 'unknown', reason: 'invalid-reply' };
-    if (/To use Codex here,\s*create an environment for this repo/i.test(text)) {
+    if (/To use Codex here,\s*\[?create an environment for this repo/i.test(text)) {
         return { state: 'blocked', reason: 'environment-not-recognized' };
     }
     if (/usage limit|quota exceeded|rate limit|insufficient.quota/i.test(text)) {
