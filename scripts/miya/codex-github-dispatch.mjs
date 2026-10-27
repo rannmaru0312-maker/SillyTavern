@@ -4,20 +4,24 @@ import { evaluateLoop } from './continuous-loop-policy.mjs';
 // The caller submits the prepared text using an authenticated GitHub connector.
 // No token handling, HTTP requests, process spawn, or paid API usage here.
 const SHA = /^[a-f0-9]{40}$/;
-export function prepareCodexComment({ gate, sourcePr, instruction, workBranch }) {
+// Fixed, reviewed task templates only; never interpolate untrusted issue or review text.
+const TASKS = Object.freeze({
+    'fix-test-isolation': 'Fix the approved test isolation regression in this development PR.',
+    'add-regression-tests': 'Add isolated regression tests for the approved development change.',
+});
+export function prepareCodexComment({ gate, sourcePr, taskId, workBranch }) {
     const result = evaluateLoop(gate);
     if (!result.mayDispatch) return { ok: false, reason: result.reason };
     if (!Number.isSafeInteger(sourcePr) || sourcePr < 1
         || typeof workBranch !== 'string' || !/^miya-ai-[a-z0-9-]{1,60}$/.test(workBranch)
-        || typeof instruction !== 'string' || instruction.length < 1 || instruction.length > 1000
-        || /[\r\n@]/.test(instruction)) {
+        || typeof taskId !== 'string' || !Object.hasOwn(TASKS, taskId)) {
         return { ok: false, reason: 'invalid-dispatch-input' };
     }
     return {
         ok: true,
         prNumber: sourcePr,
         idempotencyKey: `codex:${sourcePr}:${gate.headSha}`,
-        comment: `@codex ${instruction}\n\nMIYA handoff: source PR #${sourcePr}, verified SHA ${gate.headSha}, target branch ${workBranch}. Development changes only; no merge, deployment, release modification, secrets, paid usage, or production access. On environment or quota failure report the blocker without retrying.`,
+        comment: `@codex ${TASKS[taskId]}\n\nMIYA handoff: source PR #${sourcePr}, verified SHA ${gate.headSha}, target branch ${workBranch}. Development changes only; no merge, deployment, release modification, secrets, paid usage, or production access. On environment or quota failure report the blocker without retrying.`,
     };
 }
 
