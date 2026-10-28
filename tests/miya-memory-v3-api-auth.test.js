@@ -404,4 +404,122 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         expect(fs.existsSync(path.join(tmpDir, 'runtime-data'))).toBe(false);
     });
 
+
+    test('100 pending candidates are isolated per user and approval frees exactly one slot', async () => {
+        const router = fakeRouter();
+        await init(router);
+
+        const add = (userId, text, characterId = 'fictional_character_a') => {
+            const res = response();
+            router.handlers.get('POST /candidate-v3')({
+                user: { profile: { handle: userId } },
+                body: {
+                    userId: 'untrusted_client_id',
+                    characterId,
+                    text,
+                },
+            }, res);
+            return res;
+        };
+
+        const decisionsFor = (userId) => {
+            const res = response();
+            router.handlers.get('GET /decisions-v3')({
+                user: { profile: { handle: userId } },
+                query: { userId: 'untrusted_client_id' },
+            }, res);
+            expect(res.statusCode).toBe(200);
+            return res.payload.pending;
+        };
+
+        let firstCandidateId;
+        for (let index = 0; index < 100; index++) {
+            const created = add('fictional_user_a', `Fictional pending preference ${index}`);
+            expect(created.statusCode).toBe(201);
+            if (index === 0) firstCandidateId = created.payload.candidate.id;
+        }
+        expect(decisionsFor('fictional_user_a')).toHaveLength(100);
+
+        const overflow = add('fictional_user_a', 'Fictional preference over the limit');
+        expect(overflow.statusCode).toBe(409);
+        expect(overflow.payload).toEqual(expect.objectContaining({
+            reason: 'pending-limit',
+            limit: 100,
+            pendingCount: 100,
+        }));
+        // The pending cap applies to the whole authenticated user, not to one character.
+        const crossCharacterOverflow = add('fictional_user_a', 'New preference for another character', 'fictional_character_b');
+        expect(crossCharacterOverflow.statusCode).toBe(409);
+        expect(crossCharacterOverflow.payload).toEqual(expect.objectContaining({
+            reason: 'pending-limit',
+            pendingCount: 100,
+        }));
+        expect(decisionsFor('fictional_user_a')).toHaveLength(100);
+
+        // Even at capacity, an existing candidate is reported as a duplicate,
+        // rather than silently creating or overwriting another pending item.
+        const duplicate = add('fictional_user_a', 'Fictional pending preference 0');
+        expect(duplicate.statusCode).toBe(409);
+        expect(duplicate.payload.reason).toBe('duplicate-candidate');
+
+        const held = response();
+        router.handlers.get('POST /decision-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body: { candidateId: firstCandidateId, decision: 'hold' },
+        }, held);
+        expect(held.statusCode).toBe(200);
+        expect(add('fictional_user_a', 'Hold does not free a slot').payload.reason).toBe('pending-limit');
+        expect(decisionsFor('fictional_user_a')).toHaveLength(100);
+
+        // Capacity is per authenticated user, not shared globally.
+        expect(add('fictional_user_b', 'Fictional preference for B').statusCode).toBe(201);
+        expect(decisionsFor('fictional_user_b')).toHaveLength(1);
+
+        const approved = response();
+        router.handlers.get('POST /decision-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body: { candidateId: firstCandidateId, decision: 'approve' },
+        }, approved);
+        expect(approved.statusCode).toBe(200);
+        expect(decisionsFor('fictional_user_a')).toHaveLength(99);
+
+        const replacement = add('fictional_user_a', 'New candidate after explicit approval', 'fictional_character_b');
+        expect(replacement.statusCode).toBe(201);
+        const pending = decisionsFor('fictional_user_a');
+        expect(pending).toHaveLength(100);
+        expect(pending.some(item => item.id === firstCandidateId)).toBe(false);
+        expect(pending).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: replacement.payload.candidate.id,
+                characterId: 'fictional_character_b',
+            }),
+        ]));
+        expect(decisionsFor('fictional_user_b')).toHaveLength(1);
+
+        const memories = response();
+        router.handlers.get('GET /character-memories')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            query: { characterId: 'fictional_character_a' },
+        }, memories);
+        expect(memories.statusCode).toBe(200);
+        expect(memories.payload.memories.map(item => item.text)).toEqual(['Fictional pending preference 0']);
+    });
+
+    test.each([
+        ['traversal candidateId', { candidateId: '../another_user', decision: 'approve' }],
+        ['missing candidateId', { decision: 'approve' }],
+        ['unsupported decision', { candidateId: 'fictional_candidate', decision: 'delete' }],
+        ['missing decision', { candidateId: 'fictional_candidate' }],
+    ])('decision API rejects %s before creating storage', async (_case, body) => {
+        const router = fakeRouter();
+        await init(router);
+        const res = response();
+        router.handlers.get('POST /decision-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body,
+        }, res);
+        expect(res.statusCode).toBe(400);
+        expect(fs.existsSync(path.join(tmpDir, 'runtime-data'))).toBe(false);
+    });
+
 });
