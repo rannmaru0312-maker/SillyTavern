@@ -63,6 +63,54 @@ describe('MIYA memory v3 core', () => {
         expect(readDecisions('fictional_user').pending).toContainEqual(candidate);
     });
 
+    test('does not add a normalized duplicate candidate', () => {
+        const candidate = addCandidate('fictional_user', 'fictional_character', 'Likes tea');
+
+        expect(addCandidate('fictional_user', 'fictional_character', '  Ｌｉｋｅｓ   tea  ')).toEqual({
+            saved: false,
+            reason: 'duplicate-candidate',
+            candidate,
+        });
+        expect(readDecisions('fictional_user').pending).toEqual([candidate]);
+    });
+
+    test('allows the same candidate for a different character', () => {
+        addCandidate('fictional_user', 'fictional_character_a', 'Likes tea');
+
+        expect(addCandidate('fictional_user', 'fictional_character_b', 'Likes tea')).toHaveProperty('status', 'pending');
+        expect(readDecisions('fictional_user').pending).toHaveLength(2);
+    });
+
+    test('checks normalized duplicates against approved memories', () => {
+        saveUserMemory('fictional_user', 'fictional_character', 'Ｌｉｋｅｓ　 tea');
+
+        expect(addCandidate('fictional_user', 'fictional_character', ' Likes   tea ')).toEqual({
+            saved: false,
+            reason: 'duplicate-memory',
+        });
+        expect(readDecisions('fictional_user').pending).toEqual([]);
+        expect(readMemories('fictional_user', 'fictional_character').memories).toHaveLength(1);
+    });
+
+    test('does not deduplicate across users or character memories', () => {
+        addCandidate('fictional_user_a', 'fictional_character_a', 'Likes tea');
+        saveUserMemory('fictional_user_a', 'fictional_character_b', 'Likes coffee');
+
+        expect(addCandidate('fictional_user_b', 'fictional_character_a', 'Likes tea')).toHaveProperty('status', 'pending');
+        expect(addCandidate('fictional_user_a', 'fictional_character_a', 'Likes coffee')).toHaveProperty('status', 'pending');
+        expect(readDecisions('fictional_user_a').pending).toHaveLength(2);
+        expect(readDecisions('fictional_user_b').pending).toHaveLength(1);
+    });
+
+    test('does not duplicate a memory added after the candidate was created', () => {
+        const candidate = addCandidate('fictional_user', 'fictional_character', 'Ｌｉｋｅｓ   tea');
+        saveUserMemory('fictional_user', 'fictional_character', 'Likes tea');
+
+        expect(saveDecision('fictional_user', candidate.id, 'approve')).toHaveProperty('saved', true);
+        expect(readDecisions('fictional_user').pending).toEqual([]);
+        expect(readMemories('fictional_user', 'fictional_character').memories.map(item => item.text)).toEqual(['Likes tea']);
+    });
+
     test('holding a candidate does not save it to long-term memory', () => {
         const candidate = addCandidate('fictional_user', 'fictional_character', 'Likes tea');
 
