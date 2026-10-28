@@ -1,3 +1,4 @@
+/* global globalThis */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from '@jest/globals';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -74,14 +75,14 @@ describe('MIYA memory V3: HTTP login, signed session and CSRF integration', () =
         const { setConfigFilePath } = await import('../src/util.js');
         setConfigFilePath(configFile);
 
-        const [expressModule, cookieModule, csrfModule, users, loginModule, storageModule] = await Promise.all([
-            import('express'),
-            import('cookie-session'),
-            import('csrf-sync'),
-            import('../src/users.js'),
-            import('../src/endpoints/users-public.js'),
-            import('node-persist'),
-        ]);
+        // Jest's ESM VM loader cannot link users.js and its re-exporting
+        // users-public.js dependency concurrently; load them sequentially.
+        const expressModule = await import('express');
+        const cookieModule = await import('cookie-session');
+        const csrfModule = await import('csrf-sync');
+        const users = await import('../src/users.js');
+        const loginModule = await import('../src/endpoints/users-public.js');
+        const storageModule = await import('node-persist');
         storage = storageModule.default;
         await users.initUserStorage(fixtureRoot);
 
