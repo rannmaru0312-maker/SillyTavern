@@ -255,4 +255,54 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         expect(fs.existsSync(path.join(tmpDir, 'runtime-data'))).toBe(false);
     });
 
+
+    test('holding a candidate never writes long-term memory; approval saves it once', async () => {
+        const router = fakeRouter();
+        await init(router);
+
+        const added = response();
+        router.handlers.get('POST /candidate-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body: { characterId: 'fictional_character', text: 'Pending until approval' },
+        }, added);
+        expect(added.statusCode).toBe(201);
+        const candidateId = added.payload.candidate.id;
+
+        const readMemories = () => {
+            const res = response();
+            router.handlers.get('GET /character-memories')({
+                user: { profile: { handle: 'fictional_user_a' } },
+                query: { characterId: 'fictional_character' },
+            }, res);
+            expect(res.statusCode).toBe(200);
+            return res.payload.memories;
+        };
+
+        expect(readMemories()).toEqual([]);
+
+        const held = response();
+        router.handlers.get('POST /decision-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body: { candidateId, decision: 'hold' },
+        }, held);
+        expect(held.statusCode).toBe(200);
+        expect(readMemories()).toEqual([]);
+
+        const approved = response();
+        router.handlers.get('POST /decision-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body: { candidateId, decision: 'approve' },
+        }, approved);
+        expect(approved.statusCode).toBe(200);
+        expect(readMemories()).toEqual([
+            expect.objectContaining({ text: 'Pending until approval' }),
+        ]);
+
+        const decisions = response();
+        router.handlers.get('GET /decisions-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+        }, decisions);
+        expect(decisions.payload.pending).toEqual([]);
+    });
+
 });
