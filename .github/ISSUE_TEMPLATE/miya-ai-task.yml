@@ -1,0 +1,36 @@
+name: MIYA AI共同開発
+description: 開発タスクとAI間の引き継ぎ
+title: "[MIYA] "
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: 目的・完了条件
+      description: 個人情報や認証情報は入力しない
+    validations:
+      required: true
+  - type: textarea
+    id: handoff
+    attributes:
+      label: 引き継ぎ情報
+      value: |
+        担当AI：未割り当て
+        開発ベース：miya-ai-dev
+        作業ブランチ：
+        開始コミットSHA：
+        関連PR・Issue：
+        変更対象・対象外：
+        完了作業：
+        検証コマンド・結果・対象SHA：
+        未確認事項・次の作業：
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: 安全条件
+      options:
+        - label: release・本番サーバー・本番記憶を変更せず、自動マージ・デプロイを行わない
+          required: true
+        - label: Copilotへの割り当て前にbase=miya-ai-devを確認する
+          required: true
