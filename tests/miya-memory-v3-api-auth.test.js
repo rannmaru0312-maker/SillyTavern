@@ -288,6 +288,15 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         expect(held.statusCode).toBe(200);
         expect(readMemories()).toEqual([]);
 
+        const pendingWhileHeld = response();
+        router.handlers.get('GET /decisions-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+        }, pendingWhileHeld);
+        expect(pendingWhileHeld.statusCode).toBe(200);
+        expect(pendingWhileHeld.payload.pending).toEqual([
+            expect.objectContaining({ id: candidateId, status: 'pending' }),
+        ]);
+
         const approved = response();
         router.handlers.get('POST /decision-v3')({
             user: { profile: { handle: 'fictional_user_a' } },
