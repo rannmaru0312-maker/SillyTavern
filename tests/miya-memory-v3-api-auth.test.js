@@ -117,4 +117,201 @@ describe('MIYA memory V3 API authorization boundaries', () => {
             expect.objectContaining({ text: 'Likes tea', characterId: 'fictional_character', status: 'pending' }),
         ]);
     });
+
+    test('authenticated user ignores a forged userId when saving candidates', async () => {
+        const router = fakeRouter();
+        await init(router);
+
+        const res = response();
+        router.handlers.get('POST /candidate-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body: {
+                userId: 'fictional_user_b',
+                characterId: 'fictional_character',
+                text: 'A private fictional preference',
+            },
+        }, res);
+        expect(res.statusCode).toBe(201);
+
+        const userADecisions = path.join(tmpDir, 'runtime-data', 'users', 'fictional_user_a', 'decisions', 'pending.json');
+        const userBDir = path.join(tmpDir, 'runtime-data', 'users', 'fictional_user_b');
+        expect(JSON.parse(fs.readFileSync(userADecisions, 'utf8')).pending).toEqual([
+            expect.objectContaining({ text: 'A private fictional preference' }),
+        ]);
+        expect(fs.existsSync(userBDir)).toBe(false);
+    });
+
+    test('authenticated user cannot approve another user\'s pending candidate', async () => {
+        const router = fakeRouter();
+        await init(router);
+
+        const added = response();
+        router.handlers.get('POST /candidate-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body: { characterId: 'fictional_character', text: 'Only A can approve' },
+        }, added);
+        expect(added.statusCode).toBe(201);
+        const candidateId = added.payload.candidate.id;
+
+        const forged = response();
+        router.handlers.get('POST /decision-v3')({
+            user: { profile: { handle: 'fictional_user_b' } },
+            body: { userId: 'fictional_user_a', candidateId, decision: 'approve' },
+        }, forged);
+        expect(forged.statusCode).toBe(404);
+
+        const pendingFile = path.join(tmpDir, 'runtime-data', 'users', 'fictional_user_a', 'decisions', 'pending.json');
+        expect(JSON.parse(fs.readFileSync(pendingFile, 'utf8')).pending).toEqual([
+            expect.objectContaining({ id: candidateId, status: 'pending' }),
+        ]);
+        const readA = response();
+        router.handlers.get('GET /character-memories')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            query: { characterId: 'fictional_character' },
+        }, readA);
+        expect(readA.statusCode).toBe(200);
+        expect(readA.payload.memories).toEqual([]);
+    });
+
+    test('decisions endpoint ignores another userId in query and reads only authenticated user', async () => {
+        const router = fakeRouter();
+        await init(router);
+
+        const added = response();
+        router.handlers.get('POST /candidate-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body: { characterId: 'fictional_character', text: 'A only' },
+        }, added);
+        expect(added.statusCode).toBe(201);
+
+        const asB = response();
+        router.handlers.get('GET /decisions-v3')({
+            user: { profile: { handle: 'fictional_user_b' } },
+            query: { userId: 'fictional_user_a' },
+        }, asB);
+        expect(asB.statusCode).toBe(200);
+        expect(asB.payload.pending).toEqual([]);
+
+        const asA = response();
+        router.handlers.get('GET /decisions-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            query: { userId: 'fictional_user_b' },
+        }, asA);
+        expect(asA.statusCode).toBe(200);
+        expect(asA.payload.pending).toEqual([
+            expect.objectContaining({ text: 'A only', characterId: 'fictional_character' }),
+        ]);
+    });
+
+    test('character memory route keeps approved memories separate by character and user', async () => {
+        const router = fakeRouter();
+        await init(router);
+
+        const createA = response();
+        router.handlers.get('POST /candidate-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body: { characterId: 'fictional_character_a', text: 'For A character A' },
+        }, createA);
+        expect(createA.statusCode).toBe(201);
+
+        const approveA = response();
+        router.handlers.get('POST /decision-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body: { candidateId: createA.payload.candidate.id, decision: 'approve' },
+        }, approveA);
+        expect(approveA.statusCode).toBe(200);
+
+        for (const [userId, characterId, expected] of [
+            ['fictional_user_a', 'fictional_character_a', ['For A character A']],
+            ['fictional_user_a', 'fictional_character_b', []],
+            ['fictional_user_b', 'fictional_character_a', []],
+        ]) {
+            const read = response();
+            router.handlers.get('GET /character-memories')({
+                user: { profile: { handle: userId } },
+                query: { characterId, userId: 'fictional_user_a' },
+            }, read);
+            expect(read.statusCode).toBe(200);
+            expect(read.payload.memories.map(item => item.text)).toEqual(expected);
+        }
+    });
+
+    test('invalid server-side identity is rejected without creating storage', async () => {
+        const router = fakeRouter();
+        await init(router);
+        for (const [method, route, args] of [
+            ['GET', '/character-memories', { query: { characterId: 'fictional_character' } }],
+            ['GET', '/decisions-v3', {}],
+            ['POST', '/candidate-v3', { body: { characterId: 'fictional_character', text: 'No write' } }],
+            ['POST', '/decision-v3', { body: { candidateId: 'fake-id', decision: 'approve' } }],
+        ]) {
+            const res = response();
+            router.handlers.get(method + ' ' + route)({
+                ...args,
+                user: { profile: { handle: '../outside' } },
+            }, res);
+            expect(res.statusCode).toBe(403);
+        }
+        expect(fs.existsSync(path.join(tmpDir, 'runtime-data'))).toBe(false);
+    });
+
+
+    test('holding a candidate never writes long-term memory; approval saves it once', async () => {
+        const router = fakeRouter();
+        await init(router);
+
+        const added = response();
+        router.handlers.get('POST /candidate-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body: { characterId: 'fictional_character', text: 'Pending until approval' },
+        }, added);
+        expect(added.statusCode).toBe(201);
+        const candidateId = added.payload.candidate.id;
+
+        const readMemories = () => {
+            const res = response();
+            router.handlers.get('GET /character-memories')({
+                user: { profile: { handle: 'fictional_user_a' } },
+                query: { characterId: 'fictional_character' },
+            }, res);
+            expect(res.statusCode).toBe(200);
+            return res.payload.memories;
+        };
+
+        expect(readMemories()).toEqual([]);
+
+        const held = response();
+        router.handlers.get('POST /decision-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body: { candidateId, decision: 'hold' },
+        }, held);
+        expect(held.statusCode).toBe(200);
+        expect(readMemories()).toEqual([]);
+
+        const pendingWhileHeld = response();
+        router.handlers.get('GET /decisions-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+        }, pendingWhileHeld);
+        expect(pendingWhileHeld.statusCode).toBe(200);
+        expect(pendingWhileHeld.payload.pending).toEqual([
+            expect.objectContaining({ id: candidateId, status: 'pending' }),
+        ]);
+
+        const approved = response();
+        router.handlers.get('POST /decision-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body: { candidateId, decision: 'approve' },
+        }, approved);
+        expect(approved.statusCode).toBe(200);
+        expect(readMemories()).toEqual([
+            expect.objectContaining({ text: 'Pending until approval' }),
+        ]);
+
+        const decisions = response();
+        router.handlers.get('GET /decisions-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+        }, decisions);
+        expect(decisions.payload.pending).toEqual([]);
+    });
+
 });
