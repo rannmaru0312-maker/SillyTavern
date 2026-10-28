@@ -314,4 +314,94 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         expect(decisions.payload.pending).toEqual([]);
     });
 
+
+    test('pending duplicates are scoped to the authenticated user and character', async () => {
+        const router = fakeRouter();
+        await init(router);
+        const create = (userId, characterId) => {
+            const res = response();
+            router.handlers.get('POST /candidate-v3')({
+                user: { profile: { handle: userId } },
+                body: { characterId, text: 'An identical fictional preference', userId: 'untrusted_client_id' },
+            }, res);
+            return res;
+        };
+
+        expect(create('fictional_user_a', 'fictional_character_a').statusCode).toBe(201);
+        const duplicate = create('fictional_user_a', 'fictional_character_a');
+        expect(duplicate.statusCode).toBe(409);
+        expect(duplicate.payload.reason).toBe('duplicate-candidate');
+
+        expect(create('fictional_user_a', 'fictional_character_b').statusCode).toBe(201);
+        expect(create('fictional_user_b', 'fictional_character_a').statusCode).toBe(201);
+
+        for (const [userId, expectedCharacters] of [
+            ['fictional_user_a', ['fictional_character_a', 'fictional_character_b']],
+            ['fictional_user_b', ['fictional_character_a']],
+        ]) {
+            const res = response();
+            router.handlers.get('GET /decisions-v3')({
+                user: { profile: { handle: userId } },
+                query: { userId: 'untrusted_client_id' },
+            }, res);
+            expect(res.statusCode).toBe(200);
+            expect(res.payload.pending.map(item => item.characterId).sort()).toEqual(expectedCharacters);
+        }
+    });
+
+    test('approved memory cannot be requeued as another pending candidate', async () => {
+        const router = fakeRouter();
+        await init(router);
+        const add = () => {
+            const res = response();
+            router.handlers.get('POST /candidate-v3')({
+                user: { profile: { handle: 'fictional_user_a' } },
+                body: { characterId: 'fictional_character_a', text: 'A confirmed fictional preference' },
+            }, res);
+            return res;
+        };
+        const created = add();
+        expect(created.statusCode).toBe(201);
+        const approved = response();
+        router.handlers.get('POST /decision-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body: { candidateId: created.payload.candidate.id, decision: 'approve' },
+        }, approved);
+        expect(approved.statusCode).toBe(200);
+
+        const duplicate = add();
+        expect(duplicate.statusCode).toBe(409);
+        expect(duplicate.payload.reason).toBe('duplicate-memory');
+
+        const decisions = response();
+        router.handlers.get('GET /decisions-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+        }, decisions);
+        expect(decisions.payload.pending).toEqual([]);
+
+        const memories = response();
+        router.handlers.get('GET /character-memories')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            query: { characterId: 'fictional_character_a' },
+        }, memories);
+        expect(memories.payload.memories.map(item => item.text)).toEqual(['A confirmed fictional preference']);
+    });
+
+    test.each([
+        ['traversal characterId', { characterId: '../escape', text: 'Fictional value' }],
+        ['empty text', { characterId: 'fictional_character', text: '   ' }],
+        ['oversized text', { characterId: 'fictional_character', text: 'x'.repeat(2001) }],
+        ['oversized reason', { characterId: 'fictional_character', text: 'Fictional value', reason: 'x'.repeat(1001) }],
+    ])('candidate API rejects %s before creating any storage', async (_reason, body) => {
+        const router = fakeRouter();
+        await init(router);
+        const res = response();
+        router.handlers.get('POST /candidate-v3')({
+            user: { profile: { handle: 'fictional_user_a' } },
+            body,
+        }, res);
+        expect(res.statusCode).toBe(400);
+        expect(fs.existsSync(path.join(tmpDir, 'runtime-data'))).toBe(false);
+    });
+
 });
