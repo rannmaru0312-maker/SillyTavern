@@ -409,13 +409,13 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         const router = fakeRouter();
         await init(router);
 
-        const add = (userId, text) => {
+        const add = (userId, text, characterId = 'fictional_character_a') => {
             const res = response();
             router.handlers.get('POST /candidate-v3')({
                 user: { profile: { handle: userId } },
                 body: {
                     userId: 'untrusted_client_id',
-                    characterId: 'fictional_character_a',
+                    characterId,
                     text,
                 },
             }, res);
@@ -447,6 +447,13 @@ describe('MIYA memory V3 API authorization boundaries', () => {
             limit: 100,
             pendingCount: 100,
         }));
+        // The pending cap applies to the whole authenticated user, not to one character.
+        const crossCharacterOverflow = add('fictional_user_a', 'New preference for another character', 'fictional_character_b');
+        expect(crossCharacterOverflow.statusCode).toBe(409);
+        expect(crossCharacterOverflow.payload).toEqual(expect.objectContaining({
+            reason: 'pending-limit',
+            pendingCount: 100,
+        }));
         expect(decisionsFor('fictional_user_a')).toHaveLength(100);
 
         // Even at capacity, an existing candidate is reported as a duplicate,
@@ -476,12 +483,17 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         expect(approved.statusCode).toBe(200);
         expect(decisionsFor('fictional_user_a')).toHaveLength(99);
 
-        const replacement = add('fictional_user_a', 'New candidate after explicit approval');
+        const replacement = add('fictional_user_a', 'New candidate after explicit approval', 'fictional_character_b');
         expect(replacement.statusCode).toBe(201);
         const pending = decisionsFor('fictional_user_a');
         expect(pending).toHaveLength(100);
         expect(pending.some(item => item.id === firstCandidateId)).toBe(false);
-        expect(pending.some(item => item.id === replacement.payload.candidate.id)).toBe(true);
+        expect(pending).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: replacement.payload.candidate.id,
+                characterId: 'fictional_character_b',
+            }),
+        ]));
         expect(decisionsFor('fictional_user_b')).toHaveLength(1);
 
         const memories = response();
