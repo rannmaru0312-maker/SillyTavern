@@ -165,7 +165,7 @@ describe('MIYA memory V3: HTTP login, signed session and CSRF integration', () =
 
     afterEach(() => {
         if (fixtureRoot) {
-            fs.rmSync(path.join(fixtureRoot, 'isolated-plugin', 'v3-core', 'runtime-data'), {
+            fs.rmSync(path.join(fixtureRoot, 'isolated-plugin', 'runtime-data'), {
                 recursive: true,
                 force: true,
             });
