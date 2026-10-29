@@ -150,18 +150,30 @@ describe('MIYA memory V3: HTTP login, signed session and CSRF integration', () =
     }, 30000);
 
     afterAll(async () => {
-        if (listener) {
-            listener.closeAllConnections();
-            await new Promise(resolve => listener.close(resolve));
+        // Restore process-wide state even if closing the server or clearing
+        // the temporary account database fails. Never let cleanup failures
+        // silently preserve the test account mode or temporary data root.
+        try {
+            if (listener) {
+                listener.closeAllConnections();
+                await new Promise(resolve => listener.close(resolve));
+            }
+        } finally {
+            try {
+                if (storage) await storage.clear();
+            } finally {
+                try {
+                    if (fixtureRoot) fs.rmSync(fixtureRoot, { recursive: true, force: true });
+                } finally {
+                    if (originalAccountsEnv === undefined) {
+                        delete process.env.SILLYTAVERN_ENABLEUSERACCOUNTS;
+                    } else {
+                        process.env.SILLYTAVERN_ENABLEUSERACCOUNTS = originalAccountsEnv;
+                    }
+                    globalThis.DATA_ROOT = originalDataRoot;
+                }
+            }
         }
-        if (storage) await storage.clear();
-        if (fixtureRoot) fs.rmSync(fixtureRoot, { recursive: true, force: true });
-        if (originalAccountsEnv === undefined) {
-            delete process.env.SILLYTAVERN_ENABLEUSERACCOUNTS;
-        } else {
-            process.env.SILLYTAVERN_ENABLEUSERACCOUNTS = originalAccountsEnv;
-        }
-        globalThis.DATA_ROOT = originalDataRoot;
     }, 30000);
 
     afterEach(() => {
