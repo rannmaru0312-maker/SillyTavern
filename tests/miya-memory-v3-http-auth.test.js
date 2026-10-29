@@ -265,6 +265,34 @@ describe('MIYA memory V3: HTTP login, signed session and CSRF integration', () =
         expect(response.status).toBe(403);
     });
 
+    test('CSRF token from another authenticated session cannot create a candidate', async () => {
+        const a = await newClient();
+        const b = await newClient();
+        expect((await request(a, 'POST', '/api/users/login', {
+            handle: 'fictional_user_a', password: PASSWORD_A,
+        })).status).toBe(200);
+        expect((await request(b, 'POST', '/api/users/login', {
+            handle: 'fictional_user_b', password: PASSWORD_B,
+        })).status).toBe(200);
+        expect(a.csrf).not.toBe(b.csrf);
+
+        const originalToken = a.csrf;
+        a.csrf = b.csrf;
+        try {
+            const denied = await request(a, 'POST', ROOT + '/candidate-v3', {
+                characterId: 'fictional_character_a',
+                text: 'Must not be saved with a different session CSRF token',
+            });
+            expect(denied.status).toBe(403);
+        } finally {
+            a.csrf = originalToken;
+        }
+
+        const pending = await request(a, 'GET', ROOT + '/decisions-v3');
+        expect(pending.status).toBe(200);
+        expect(pending.payload.pending).toEqual([]);
+    });
+
     test('authenticated POST without CSRF token cannot create a candidate', async () => {
         const user = await newClient();
         expect((await request(user, 'POST', '/api/users/login', {
