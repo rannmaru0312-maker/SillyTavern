@@ -210,6 +210,34 @@ describe('MIYA memory V3: HTTP login, signed session and CSRF integration', () =
         expect(pending.payload.pending).toEqual([]);
     });
 
+    test('anonymous decision POST with a valid CSRF token cannot approve a candidate', async () => {
+        const owner = await newClient();
+        expect((await request(owner, 'POST', '/api/users/login', {
+            handle: 'fictional_user_a', password: PASSWORD_A,
+        })).status).toBe(200);
+        const created = await request(owner, 'POST', ROOT + '/candidate-v3', {
+            characterId: 'fictional_character_a',
+            text: 'Owner-only decision must stay pending',
+        });
+        expect(created.status).toBe(201);
+        const candidateId = created.payload.candidate.id;
+
+        const anonymous = await newClient();
+        const denied = await request(anonymous, 'POST', ROOT + '/decision-v3', {
+            userId: 'fictional_user_a',
+            candidateId,
+            decision: 'approve',
+        });
+        expect(denied.status).toBe(403);
+
+        const pending = await request(owner, 'GET', ROOT + '/decisions-v3');
+        expect(pending.status).toBe(200);
+        expect(pending.payload.pending.map(item => item.id)).toContain(candidateId);
+        const memories = await request(owner, 'GET', ROOT + '/character-memories?characterId=fictional_character_a');
+        expect(memories.status).toBe(200);
+        expect(memories.payload.memories).toEqual([]);
+    });
+
     test('real login rejects incorrect credentials and issues separate signed sessions', async () => {
         clientA = await newClient();
         clientB = await newClient();
