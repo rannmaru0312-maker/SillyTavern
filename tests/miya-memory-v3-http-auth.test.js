@@ -192,6 +192,24 @@ describe('MIYA memory V3: HTTP login, signed session and CSRF integration', () =
         expect(deniedMemory.status).toBe(403);
     });
 
+    test('anonymous candidate POST with a valid CSRF token cannot write pending memory', async () => {
+        const anonymous = await newClient();
+        const denied = await request(anonymous, 'POST', ROOT + '/candidate-v3', {
+            userId: 'fictional_user_a',
+            characterId: 'fictional_character_a',
+            text: 'Anonymous submission must not persist',
+        });
+        expect(denied.status).toBe(403);
+
+        const authenticated = await newClient();
+        expect((await request(authenticated, 'POST', '/api/users/login', {
+            handle: 'fictional_user_a', password: PASSWORD_A,
+        })).status).toBe(200);
+        const pending = await request(authenticated, 'GET', ROOT + '/decisions-v3');
+        expect(pending.status).toBe(200);
+        expect(pending.payload.pending).toEqual([]);
+    });
+
     test('real login rejects incorrect credentials and issues separate signed sessions', async () => {
         clientA = await newClient();
         clientB = await newClient();
