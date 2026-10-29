@@ -16,6 +16,10 @@ describe('test-only config path and cache isolation', () => {
         let restoreTemporary;
         try {
             restoreBaseline = setConfigFilePathForTests(baseline);
+            // Restore before the baseline is cached to verify the path itself,
+            // rather than accidentally passing through a stale cached value.
+            const restoreBeforeCache = setConfigFilePathForTests(temporary);
+            restoreBeforeCache();
             expect(getConfig().fixtureKey).toBe('baseline-value');
             const originalCachedConfig = getConfig();
             restoreTemporary = setConfigFilePathForTests(temporary);
