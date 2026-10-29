@@ -49,6 +49,29 @@ export function setConfigFilePath(configFilePath) {
 }
 
 /**
+ * Temporarily replace the config path and cached config in isolated test code.
+ * Production callers must use setConfigFilePath() as usual.
+ * @param {string} configFilePath Temporary config file path.
+ * @returns {() => void} Idempotent restore function.
+ */
+export function setConfigFilePathForTests(configFilePath) {
+    if (process.env.NODE_ENV !== 'test') {
+        throw new Error('Temporary config override is available only in test mode.');
+    }
+    const previousPath = CONFIG_PATH;
+    const previousCache = CACHED_CONFIG;
+    CONFIG_PATH = path.resolve(configFilePath);
+    CACHED_CONFIG = null;
+    let restored = false;
+    return () => {
+        if (restored) return;
+        restored = true;
+        CONFIG_PATH = previousPath;
+        CACHED_CONFIG = previousCache;
+    };
+}
+
+/**
  * Returns the config object from the config.yaml file.
  * @returns {object} Config object
  */
