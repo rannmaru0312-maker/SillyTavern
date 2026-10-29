@@ -222,6 +222,11 @@ describe('MIYA memory V3: HTTP login, signed session and CSRF integration', () =
         expect(created.status).toBe(201);
         const candidateId = created.payload.candidate.id;
 
+        const before = await request(owner, 'GET', ROOT + '/decisions-v3');
+        expect(before.status).toBe(200);
+        expect(before.payload.pending).toHaveLength(1);
+        expect(before.payload.pending[0].id).toBe(candidateId);
+
         const anonymous = await newClient();
         const denied = await request(anonymous, 'POST', ROOT + '/decision-v3', {
             userId: 'fictional_user_a',
@@ -232,7 +237,7 @@ describe('MIYA memory V3: HTTP login, signed session and CSRF integration', () =
 
         const pending = await request(owner, 'GET', ROOT + '/decisions-v3');
         expect(pending.status).toBe(200);
-        expect(pending.payload.pending.map(item => item.id)).toContain(candidateId);
+        expect(pending.payload.pending).toEqual(before.payload.pending);
         const memories = await request(owner, 'GET', ROOT + '/character-memories?characterId=fictional_character_a');
         expect(memories.status).toBe(200);
         expect(memories.payload.memories).toEqual([]);
