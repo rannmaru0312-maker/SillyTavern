@@ -48,16 +48,41 @@ describe('test-only config path and cache isolation', () => {
         }
     });
 
-    test('restoration callback may be invoked twice without altering the restored state', () => {
+    test('restoration callback is idempotent and cannot overwrite a newer override', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'miya-config-restore-'));
-        const file = path.join(root, 'config.yaml');
-        fs.writeFileSync(file, 'fixtureKey: restore-twice\n');
-        const restore = setConfigFilePathForTests(file);
+        const baseline = path.join(root, 'baseline.yaml');
+        const temporary = path.join(root, 'temporary.yaml');
+        const newer = path.join(root, 'newer.yaml');
+        fs.writeFileSync(baseline, 'fixtureKey: baseline-restored\n');
+        fs.writeFileSync(temporary, 'fixtureKey: first-override\n');
+        fs.writeFileSync(newer, 'fixtureKey: second-override\n');
+
+        let restoreBaseline;
+        let restoreTemporary;
+        let restoreNewer;
         try {
-            expect(getConfig().fixtureKey).toBe('restore-twice');
+            restoreBaseline = setConfigFilePathForTests(baseline);
+            const baselineCache = getConfig();
+            restoreTemporary = setConfigFilePathForTests(temporary);
+            expect(getConfig().fixtureKey).toBe('first-override');
+
+            restoreTemporary();
+            expect(getConfig()).toBe(baselineCache);
+
+            // A stale restore callback must not undo a later active override.
+            restoreNewer = setConfigFilePathForTests(newer);
+            const newerCache = getConfig();
+            expect(newerCache.fixtureKey).toBe('second-override');
+            restoreTemporary();
+            expect(getConfig()).toBe(newerCache);
+
+            restoreNewer();
+            restoreNewer = null;
+            expect(getConfig()).toBe(baselineCache);
         } finally {
-            restore();
-            restore();
+            if (restoreNewer) restoreNewer();
+            if (restoreTemporary) restoreTemporary();
+            if (restoreBaseline) restoreBaseline();
             fs.rmSync(root, { recursive: true, force: true });
         }
     });
