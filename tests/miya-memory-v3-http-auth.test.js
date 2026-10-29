@@ -21,6 +21,7 @@ describe('MIYA memory V3: HTTP login, signed session and CSRF integration', () =
     let clientB;
     let originalDataRoot;
     let originalAccountsEnv;
+    let restoreConfigFilePath;
 
     function saveCookies(jar, response) {
         for (const header of response.headers.getSetCookie()) {
@@ -72,8 +73,8 @@ describe('MIYA memory V3: HTTP login, signed session and CSRF integration', () =
 
         const configFile = path.join(fixtureRoot, 'config.yaml');
         fs.writeFileSync(configFile, 'enableUserAccounts: true\n');
-        const { setConfigFilePath } = await import('../src/util.js');
-        setConfigFilePath(configFile);
+        const { setConfigFilePathForTests } = await import('../src/util.js');
+        restoreConfigFilePath = setConfigFilePathForTests(configFile);
 
         // Jest's ESM VM loader cannot link users.js and its re-exporting
         // users-public.js dependency concurrently; load them sequentially.
@@ -171,6 +172,9 @@ describe('MIYA memory V3: HTTP login, signed session and CSRF integration', () =
                         process.env.SILLYTAVERN_ENABLEUSERACCOUNTS = originalAccountsEnv;
                     }
                     globalThis.DATA_ROOT = originalDataRoot;
+                    // Restore util.js module-scoped config state after the test.
+                    // Safe even when earlier cleanup operations have failed.
+                    if (restoreConfigFilePath) restoreConfigFilePath();
                 }
             }
         }
