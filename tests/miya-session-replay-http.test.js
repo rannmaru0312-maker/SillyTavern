@@ -12,8 +12,10 @@ let fixtureRoot;
 let child;
 let baseUrl;
 
-async function start(timeoutSeconds = -1) {
-    fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'miya-session-replay-'));
+async function start(timeoutSeconds = -1, reuseRoot = false) {
+    if (!reuseRoot || !fixtureRoot) {
+        fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'miya-session-replay-'));
+    }
     child = spawn(process.execPath, [script], {
         cwd,
         env: {
@@ -114,7 +116,7 @@ function signedCookieSnapshot(jar) {
     return snapshot;
 }
 
-afterEach(async () => {
+async function stopFixture() {
     if (child) {
         if (child.exitCode === null && child.signalCode === null) {
             child.kill('SIGTERM');
@@ -131,6 +133,10 @@ afterEach(async () => {
         }
         child = undefined;
     }
+}
+
+afterEach(async () => {
+    await stopFixture();
     if (fixtureRoot) {
         fs.rmSync(fixtureRoot, { recursive: true, force: true });
         fixtureRoot = undefined;
@@ -159,6 +165,32 @@ describe('account sessions: live HTTP replay and expiry', () => {
         expect((await login(newLogin)).status).toBe(200);
         expect((await send(newLogin, 'GET', '/api/users/me')).status).toBe(200);
         expect((await send(stolenBeforeLogout, 'GET', '/api/users/me')).status).toBe(403);
+    }, 45000);
+
+    test('revocation persists across a server restart; another device remains logged in', async () => {
+        await start();
+        const loggedOut = await openJar();
+        const stillValid = await openJar();
+        expect((await login(loggedOut)).status).toBe(200);
+        expect((await login(stillValid)).status).toBe(200);
+        const stolenCookie = signedCookieSnapshot(loggedOut);
+        expect((await send(loggedOut, 'POST', '/api/users/logout')).status).toBe(204);
+
+        await stopFixture();
+        await start(-1, true);
+        expect((await send(stolenCookie, 'GET', '/api/users/me')).status).toBe(403);
+        expect((await send(stillValid, 'GET', '/api/users/me')).status).toBe(200);
+    }, 45000);
+
+    test('legacy signed cookies without a server-backed session ID must log in again', async () => {
+        await start();
+        const browser = await openJar();
+        expect((await send(browser, 'GET', '/__fixture/legacy-cookie')).status).toBe(204);
+        const oldCookie = signedCookieSnapshot(browser);
+        expect((await send(oldCookie, 'GET', '/api/users/me')).status).toBe(403);
+        const fresh = await openJar();
+        expect((await login(fresh)).status).toBe(200);
+        expect((await send(fresh, 'GET', '/api/users/me')).status).toBe(200);
     }, 45000);
 
     test('server-side expiration rejects a previously signed cookie', async () => {
