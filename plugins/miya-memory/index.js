@@ -1,5 +1,21 @@
 const path = require('node:path');
 
+// Require a verified SillyTavern account session, not merely a DEFAULT_USER
+// profile that is also present when enableUserAccounts=false.
+function authenticatedMemoryUserId(req) {
+    const userId = req.user?.profile?.handle;
+    if (
+        typeof userId !== 'string' ||
+        !/^[a-zA-Z0-9_-]{1,64}$/.test(userId) ||
+        req.user?.accountSessionValidated !== true ||
+        req.user.profile.enabled !== true ||
+        req.session?.handle !== userId
+    ) {
+        return null;
+    }
+    return userId;
+}
+
 const info = {
     id: 'miya-memory',
     name: 'MIYA Memory Test',
@@ -9,7 +25,7 @@ const info = {
 async function init(router) {
     // V3: ログイン利用者専用の記憶読み取りAPI
     router.get('/character-memories', (req, res) => {
-        const userId = req.user?.profile?.handle;
+        const userId = authenticatedMemoryUserId(req);
         const characterId = req.query.characterId;
         const validId = /^[a-zA-Z0-9_-]{1,64}$/;
 
@@ -42,11 +58,11 @@ async function init(router) {
 
     // 直接保存APIは廃止。承認処理経由のみ保存可能。
 
-    require("./add-decision-v3-api.js")(router);
-    require("./add-candidate-v3-api.js")(router);
+    require("./add-decision-v3-api.js")(router, authenticatedMemoryUserId);
+    require("./add-candidate-v3-api.js")(router, authenticatedMemoryUserId);
     // V3: ログイン利用者専用の記憶候補・判定結果読み出しAPI
     router.get('/decisions-v3', (req, res) => {
-        const userId = req.user?.profile?.handle;
+        const userId = authenticatedMemoryUserId(req);
         const validId = /^[a-zA-Z0-9_-]{1,64}$/;
 
         if (typeof userId !== 'string' || !validId.test(userId)) {
