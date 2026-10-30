@@ -1,3 +1,4 @@
+/* eslint-disable playwright/no-standalone-expect -- Jest uses test blocks from @jest/globals, not Playwright. */
 import { afterEach, describe, expect, test } from '@jest/globals';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
