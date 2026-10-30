@@ -5,7 +5,8 @@ import express from 'express';
 import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible';
 import { getIpAddress, retryAfter } from '../express-common.js';
 import { color, Cache, getConfigValue } from '../util.js';
-import { KEY_PREFIX, getUserAvatar, toKey, getPasswordHash, getPasswordSalt, getAccountVersion } from '../users.js';
+import { KEY_PREFIX, getUserAvatar, toKey, getPasswordHash, getPasswordSalt, getAccountVersion, getSessionCookieAge } from '../users.js';
+import { issueAccountSession } from '../account-sessions.js';
 
 const DISCREET_LOGIN = getConfigValue('enableDiscreetLogin', false, 'boolean');
 const PREFER_REAL_IP_HEADER = getConfigValue('rateLimiting.preferRealIpHeader', false, 'boolean');
@@ -92,8 +93,7 @@ router.post('/login', async (request, response) => {
         }
 
         await loginLimiter.delete(ip);
-        request.session.handle = user.handle;
-        request.session.version = getAccountVersion(user);
+        await issueAccountSession(request, user.handle, getAccountVersion(user), getSessionCookieAge());
         console.info('Login successful:', user.handle, 'from', ip, 'at', new Date().toLocaleString());
         return response.json({ handle: user.handle });
     } catch (error) {
