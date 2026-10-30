@@ -17,6 +17,13 @@ function fakeRouter() {
     };
 }
 
+function authenticatedRequest(handle) {
+    return {
+        user: { profile: { handle, enabled: true }, accountSessionValidated: true },
+        session: { handle },
+    };
+}
+
 function response() {
     return {
         statusCode: 200,
@@ -76,6 +83,29 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         expect(res.payload).toHaveProperty('error');
     });
 
+    test.each([
+        ['GET /character-memories', { query: { characterId: 'fictional_character' } }],
+        ['GET /decisions-v3', {}],
+        ['POST /candidate-v3', { body: { characterId: 'fictional_character', text: 'Should not be stored' } }],
+        ['POST /decision-v3', { body: { candidateId: 'fictional-id', decision: 'approve' } }],
+    ])('%s fails closed for the disabled-accounts default user and mismatched sessions', async (route, args) => {
+        const router = fakeRouter();
+        await init(router);
+        for (const identity of [
+            // SillyTavern's enableUserAccounts=false path fills in DEFAULT_USER.
+            { user: { profile: { handle: 'default', enabled: true } }, session: { handle: 'default' } },
+            // A session must belong to the same verified account as req.user.
+            { user: { profile: { handle: 'fictional_user', enabled: true }, accountSessionValidated: true }, session: { handle: 'other_user' } },
+            // Reject even a matching handle when the account is disabled.
+            { user: { profile: { handle: 'fictional_user', enabled: false }, accountSessionValidated: true }, session: { handle: 'fictional_user' } },
+        ]) {
+            const res = response();
+            router.handlers.get(route)({ ...args, ...identity }, res);
+            expect(res.statusCode).toBe(403);
+        }
+        expect(fs.existsSync(path.join(tmpDir, 'runtime-data'))).toBe(false);
+    });
+
     test('a client-supplied userId cannot replace a missing authenticated identity', async () => {
         const router = fakeRouter();
         await init(router);
@@ -92,7 +122,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         await init(router);
         const res = response();
         router.handlers.get('GET /character-memories')({
-            user: { profile: { handle: 'fictional_user' } },
+            ...authenticatedRequest('fictional_user'),
             query: { characterId: '../another_user' },
         }, res);
         expect(res.statusCode).toBe(400);
@@ -106,7 +136,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         await init(router);
         const res = response();
         router.handlers.get('POST /candidate-v3')({
-            user: { profile: { handle: 'fictional_user' } },
+            ...authenticatedRequest('fictional_user'),
             body: { characterId: 'fictional_character', text: 'Likes tea' },
         }, res);
 
@@ -124,7 +154,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const res = response();
         router.handlers.get('POST /candidate-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             body: {
                 userId: 'fictional_user_b',
                 characterId: 'fictional_character',
@@ -147,7 +177,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const added = response();
         router.handlers.get('POST /candidate-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             body: { characterId: 'fictional_character', text: 'Only A can approve' },
         }, added);
         expect(added.statusCode).toBe(201);
@@ -155,7 +185,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const forged = response();
         router.handlers.get('POST /decision-v3')({
-            user: { profile: { handle: 'fictional_user_b' } },
+            ...authenticatedRequest('fictional_user_b'),
             body: { userId: 'fictional_user_a', candidateId, decision: 'approve' },
         }, forged);
         expect(forged.statusCode).toBe(404);
@@ -166,7 +196,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         ]);
         const readA = response();
         router.handlers.get('GET /character-memories')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             query: { characterId: 'fictional_character' },
         }, readA);
         expect(readA.statusCode).toBe(200);
@@ -179,14 +209,14 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const added = response();
         router.handlers.get('POST /candidate-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             body: { characterId: 'fictional_character', text: 'A only' },
         }, added);
         expect(added.statusCode).toBe(201);
 
         const asB = response();
         router.handlers.get('GET /decisions-v3')({
-            user: { profile: { handle: 'fictional_user_b' } },
+            ...authenticatedRequest('fictional_user_b'),
             query: { userId: 'fictional_user_a' },
         }, asB);
         expect(asB.statusCode).toBe(200);
@@ -194,7 +224,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const asA = response();
         router.handlers.get('GET /decisions-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             query: { userId: 'fictional_user_b' },
         }, asA);
         expect(asA.statusCode).toBe(200);
@@ -209,14 +239,14 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const createA = response();
         router.handlers.get('POST /candidate-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             body: { characterId: 'fictional_character_a', text: 'For A character A' },
         }, createA);
         expect(createA.statusCode).toBe(201);
 
         const approveA = response();
         router.handlers.get('POST /decision-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             body: { candidateId: createA.payload.candidate.id, decision: 'approve' },
         }, approveA);
         expect(approveA.statusCode).toBe(200);
@@ -228,7 +258,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         ]) {
             const read = response();
             router.handlers.get('GET /character-memories')({
-                user: { profile: { handle: userId } },
+                ...authenticatedRequest(userId),
                 query: { characterId, userId: 'fictional_user_a' },
             }, read);
             expect(read.statusCode).toBe(200);
@@ -248,7 +278,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
             const res = response();
             router.handlers.get(method + ' ' + route)({
                 ...args,
-                user: { profile: { handle: '../outside' } },
+                ...authenticatedRequest('../outside'),
             }, res);
             expect(res.statusCode).toBe(403);
         }
@@ -262,7 +292,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const added = response();
         router.handlers.get('POST /candidate-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             body: { characterId: 'fictional_character', text: 'Pending until approval' },
         }, added);
         expect(added.statusCode).toBe(201);
@@ -271,7 +301,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         const readMemories = () => {
             const res = response();
             router.handlers.get('GET /character-memories')({
-                user: { profile: { handle: 'fictional_user_a' } },
+                ...authenticatedRequest('fictional_user_a'),
                 query: { characterId: 'fictional_character' },
             }, res);
             expect(res.statusCode).toBe(200);
@@ -282,7 +312,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const held = response();
         router.handlers.get('POST /decision-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             body: { candidateId, decision: 'hold' },
         }, held);
         expect(held.statusCode).toBe(200);
@@ -290,7 +320,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const pendingWhileHeld = response();
         router.handlers.get('GET /decisions-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
         }, pendingWhileHeld);
         expect(pendingWhileHeld.statusCode).toBe(200);
         expect(pendingWhileHeld.payload.pending).toEqual([
@@ -299,7 +329,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const approved = response();
         router.handlers.get('POST /decision-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             body: { candidateId, decision: 'approve' },
         }, approved);
         expect(approved.statusCode).toBe(200);
@@ -309,7 +339,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const decisions = response();
         router.handlers.get('GET /decisions-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
         }, decisions);
         expect(decisions.payload.pending).toEqual([]);
     });
@@ -321,7 +351,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         const create = (userId, characterId) => {
             const res = response();
             router.handlers.get('POST /candidate-v3')({
-                user: { profile: { handle: userId } },
+                ...authenticatedRequest(userId),
                 body: { characterId, text: 'An identical fictional preference', userId: 'untrusted_client_id' },
             }, res);
             return res;
@@ -341,7 +371,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         ]) {
             const res = response();
             router.handlers.get('GET /decisions-v3')({
-                user: { profile: { handle: userId } },
+                ...authenticatedRequest(userId),
                 query: { userId: 'untrusted_client_id' },
             }, res);
             expect(res.statusCode).toBe(200);
@@ -355,7 +385,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         const add = () => {
             const res = response();
             router.handlers.get('POST /candidate-v3')({
-                user: { profile: { handle: 'fictional_user_a' } },
+                ...authenticatedRequest('fictional_user_a'),
                 body: { characterId: 'fictional_character_a', text: 'A confirmed fictional preference' },
             }, res);
             return res;
@@ -364,7 +394,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         expect(created.statusCode).toBe(201);
         const approved = response();
         router.handlers.get('POST /decision-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             body: { candidateId: created.payload.candidate.id, decision: 'approve' },
         }, approved);
         expect(approved.statusCode).toBe(200);
@@ -375,13 +405,13 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const decisions = response();
         router.handlers.get('GET /decisions-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
         }, decisions);
         expect(decisions.payload.pending).toEqual([]);
 
         const memories = response();
         router.handlers.get('GET /character-memories')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             query: { characterId: 'fictional_character_a' },
         }, memories);
         expect(memories.payload.memories.map(item => item.text)).toEqual(['A confirmed fictional preference']);
@@ -397,7 +427,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         await init(router);
         const res = response();
         router.handlers.get('POST /candidate-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             body,
         }, res);
         expect(res.statusCode).toBe(400);
@@ -412,7 +442,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         const add = (userId, text, characterId = 'fictional_character_a') => {
             const res = response();
             router.handlers.get('POST /candidate-v3')({
-                user: { profile: { handle: userId } },
+                ...authenticatedRequest(userId),
                 body: {
                     userId: 'untrusted_client_id',
                     characterId,
@@ -425,7 +455,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         const decisionsFor = (userId) => {
             const res = response();
             router.handlers.get('GET /decisions-v3')({
-                user: { profile: { handle: userId } },
+                ...authenticatedRequest(userId),
                 query: { userId: 'untrusted_client_id' },
             }, res);
             expect(res.statusCode).toBe(200);
@@ -464,7 +494,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const held = response();
         router.handlers.get('POST /decision-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             body: { candidateId: firstCandidateId, decision: 'hold' },
         }, held);
         expect(held.statusCode).toBe(200);
@@ -477,7 +507,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const approved = response();
         router.handlers.get('POST /decision-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             body: { candidateId: firstCandidateId, decision: 'approve' },
         }, approved);
         expect(approved.statusCode).toBe(200);
@@ -498,7 +528,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
 
         const memories = response();
         router.handlers.get('GET /character-memories')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             query: { characterId: 'fictional_character_a' },
         }, memories);
         expect(memories.statusCode).toBe(200);
@@ -515,7 +545,7 @@ describe('MIYA memory V3 API authorization boundaries', () => {
         await init(router);
         const res = response();
         router.handlers.get('POST /decision-v3')({
-            user: { profile: { handle: 'fictional_user_a' } },
+            ...authenticatedRequest('fictional_user_a'),
             body,
         }, res);
         expect(res.statusCode).toBe(400);
