@@ -2,6 +2,31 @@ import { eventSource, event_types } from '../../../events.js';
 import { getContext } from '../../../extensions.js';
 import { detectMemoryCandidate } from './candidate-rules.js';
 
+// A copied/imported card may retain another card's memory ID. Do not guess
+// its owner or silently rewrite IDs: that would reassign existing memories.
+function getUniqueMemoryCharacterId(context) {
+    if (!Array.isArray(context?.characters) ||
+        (context.groupId !== undefined && context.groupId !== null && context.groupId !== '')) {
+        return null;
+    }
+
+    const selected = context.characterId;
+    if ((typeof selected !== 'number' && typeof selected !== 'string') ||
+        !/^\d+$/.test(String(selected)) || !Number.isSafeInteger(Number(selected))) {
+        return null;
+    }
+
+    const characterId = context.characters[selected]?.data?.extensions?.miya_memory_id;
+    if (typeof characterId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(characterId)) {
+        return null;
+    }
+
+    const owners = context.characters.filter(character =>
+        character?.data?.extensions?.miya_memory_id === characterId,
+    );
+    return owners.length === 1 ? characterId : null;
+}
+
 // 会話イベントと本文取得の確認用。記憶データは変更しない
 function logLatestMessage(eventLabel) {
     try {
@@ -54,12 +79,10 @@ eventSource.on(event_types.MESSAGE_SENT, (messageIndex) => {
 
         if (candidate) {
             const context = getContext();
-            const characterId =
-                context?.characters?.[context.characterId]
-                    ?.data?.extensions?.miya_memory_id;
+            const characterId = getUniqueMemoryCharacterId(context);
 
-            if (!characterId || !/^[a-zA-Z0-9_-]{1,64}$/.test(characterId)) {
-                console.warn('[MIYA Memory] 固定IDがないため登録を見送りました');
+            if (!characterId) {
+                console.warn('[MIYA Memory] 記憶IDが未設定・不正・重複、または対象が曖昧なため登録を見送りました');
                 return;
             }
 
@@ -74,6 +97,13 @@ eventSource.on(event_types.MESSAGE_SENT, (messageIndex) => {
                     }
 
                     const { token } = await csrfResponse.json();
+
+                    // Recheck after the await: cards may have been imported,
+                    // edited, or switched while the CSRF request was pending.
+                    if (getUniqueMemoryCharacterId(getContext()) !== characterId) {
+                        console.warn('[MIYA Memory] 記憶の登録先が変わったため登録を見送りました');
+                        return;
+                    }
 
                     const response = await fetch('/api/plugins/miya-memory/candidate-v3', {
                         method: 'POST',
