@@ -3,6 +3,7 @@ import { promises as fsPromises } from 'node:fs';
 import crypto from 'node:crypto';
 
 import storage from 'node-persist';
+import { revokeAccountSession } from '../account-sessions.js';
 import express from 'express';
 import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible';
 
@@ -31,6 +32,8 @@ router.post('/logout', async (request, response) => {
             return response.sendStatus(500);
         }
 
+        await revokeAccountSession(request);
+        request.session.sid = null;
         request.session.handle = null;
         request.session.csrfToken = null;
         request.session.version = null;
