@@ -8,6 +8,7 @@ import { Buffer } from 'node:buffer';
 
 // Express and other dependencies
 import storage from 'node-persist';
+import { issueAccountSession, isAccountSessionActive, pruneExpiredAccountSessions } from './account-sessions.js';
 import express from 'express';
 import mime from 'mime-types';
 import archiver from 'archiver';
@@ -562,6 +563,7 @@ export async function initUserStorage(dataRoot) {
     });
 
     const keys = await getAllUserHandles();
+    await pruneExpiredAccountSessions();
 
     // If there are no users, create the default user
     if (keys.length === 0) {
@@ -787,9 +789,8 @@ async function singleUserLogin(request) {
     const userHandles = await getAllUserHandles();
     if (userHandles.length === 1) {
         const user = await storage.getItem(toKey(userHandles[0]));
-        if (user && !user.password) {
-            request.session.handle = userHandles[0];
-            request.session.version = getAccountVersion(user);
+        if (user && user.enabled && !user.password) {
+            await issueAccountSession(request, user.handle, getAccountVersion(user), getSessionCookieAge());
             return true;
         }
     }
@@ -883,8 +884,7 @@ async function headerUserLogin(request, header = 'Remote-User') {
         if (remoteUser.toLowerCase() === userHandle) {
             const user = await storage.getItem(toKey(userHandle));
             if (user && user.enabled) {
-                request.session.handle = userHandle;
-                request.session.version = getAccountVersion(user);
+                await issueAccountSession(request, user.handle, getAccountVersion(user), getSessionCookieAge());
                 return true;
             }
         }
@@ -925,8 +925,7 @@ async function basicUserLogin(request) {
             const user = await storage.getItem(toKey(userHandle));
             // Verify pass again here just to be sure
             if (user && user.enabled && user.password && user.password === getPasswordHash(password, user.salt)) {
-                request.session.handle = userHandle;
-                request.session.version = getAccountVersion(user);
+                await issueAccountSession(request, user.handle, getAccountVersion(user), getSessionCookieAge());
                 return true;
             }
         }
@@ -969,11 +968,12 @@ export async function setUserDataMiddleware(request, response, next) {
         return response.sendStatus(500);
     }
 
-    // If user accounts are enabled, get the user from the session
-    let handle = request.session?.handle;
-
-    // If we have the only user and it's not password protected, use it
-    if (!handle) {
+    // Require a server-side record even for a correctly signed cookie.
+    // Old stateless cookies must log in again; they cannot be revoked safely.
+    const handle = request.session.handle;
+    if (!handle) return next();
+    if (!await isAccountSessionActive(request, handle)) {
+        request.session = {};
         return next();
     }
 
