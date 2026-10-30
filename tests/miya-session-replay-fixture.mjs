@@ -11,7 +11,9 @@ globalThis.DATA_ROOT = dataRoot;
 
 const timeout = Number(process.env.MIYA_SESSION_TEST_TIMEOUT || -1);
 const config = path.join(root, 'config.yaml');
-fs.writeFileSync(config, 'enableUserAccounts: true\nsessionTimeout: ' + timeout + '\n', { flag: 'wx', mode: 0o600 });
+if (!fs.existsSync(config)) {
+    fs.writeFileSync(config, 'enableUserAccounts: true\nsessionTimeout: ' + timeout + '\n', { flag: 'wx', mode: 0o600 });
+}
 const util = await import('../src/util.js');
 util.setConfigFilePath(config);
 const users = await import('../src/users.js');
@@ -26,15 +28,17 @@ await users.initUserStorage(dataRoot);
 
 const handle = 'fictional_account';
 const salt = users.getPasswordSalt();
-await storage.setItem(users.toKey(handle), {
-    handle,
-    name: 'Fictional Test Account',
-    created: Date.now(),
-    password: users.getPasswordHash('fictional-first-password', salt),
-    salt,
-    enabled: true,
-    admin: false,
-});
+if (!await storage.getItem(users.toKey(handle))) {
+    await storage.setItem(users.toKey(handle), {
+        handle,
+        name: 'Fictional Test Account',
+        created: Date.now(),
+        password: users.getPasswordHash('fictional-first-password', salt),
+        salt,
+        enabled: true,
+        admin: false,
+    });
+}
 
 const express = expressModule.default;
 const app = express();
@@ -46,6 +50,14 @@ app.use(cookieModule.default({
     httpOnly: true,
     maxAge: users.getSessionCookieAge(),
 }));
+// Test-only route synthesizes a correctly signed pre-migration cookie
+// without a server-side session ID. It is never installed in production.
+app.get('/__fixture/legacy-cookie', async (req, res) => {
+    const user = await storage.getItem(users.toKey(handle));
+    req.session.handle = handle;
+    req.session.version = users.getAccountVersion(user);
+    res.sendStatus(204);
+});
 app.use(users.setUserDataMiddleware);
 const csrf = csrfModule.csrfSync({
     getTokenFromState: req => req.session?.csrfToken,
