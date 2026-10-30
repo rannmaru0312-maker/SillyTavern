@@ -1008,6 +1008,9 @@ export async function setUserDataMiddleware(request, response, next) {
     request.user = {
         profile: user,
         directories: directories,
+        // This flag is issued only after verifying the account version and
+        // its active, server-backed signed session (never DEFAULT_USER).
+        accountSessionValidated: true,
     };
 
     // Touch the session if loading the home page
