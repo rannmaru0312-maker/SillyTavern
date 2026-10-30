@@ -1008,6 +1008,9 @@ export async function setUserDataMiddleware(request, response, next) {
     request.user = {
         profile: user,
         directories: directories,
+        // Only set after a live, enabled account and its signed session
+        // were verified. The disabled-accounts DEFAULT_USER path has no flag.
+        accountSessionValidated: true,
     };
 
     // Touch the session if loading the home page
