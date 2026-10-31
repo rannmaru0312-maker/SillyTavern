@@ -125,6 +125,57 @@ afterEach(async () => {
 });
 
 describe('MIYA memory V3: live HTTP configuration boundaries', () => {
+    test('API only: durable approvals, duplicates, forged character IDs and account-scoped common memory', async () => {
+        await startFixture(true);
+        const a = await newClient();
+        const b = await newClient();
+        const anonymous = await newClient();
+        for (const [client, handle, password] of [
+            [a, 'fictional_user_a', 'fictional-password-a'],
+            [b, 'fictional_user_b', 'fictional-password-b'],
+        ]) {
+            expect((await request(client, 'POST', '/api/users/login', { handle, password })).status).toBe(200);
+        }
+        const body = { characterId: 'miya', text: 'Fictional MIYA-only memory' };
+        expect((await request(anonymous, 'POST', ROOT + '/candidate-v3', body)).status).toBe(403);
+        const created = await request(a, 'POST', ROOT + '/candidate-v3', { ...body, userId: 'fictional_user_b' });
+        expect(created.status).toBe(201);
+        const candidateId = created.payload.candidate.id;
+        const duplicate = await request(a, 'POST', ROOT + '/candidate-v3', body);
+        expect(duplicate.status).toBe(409);
+        expect(duplicate.payload.reason).toBe('duplicate-candidate');
+        expect((await request(a, 'GET', ROOT + '/character-memories?characterId=miya')).payload.memories).toEqual([]);
+        expect((await request(b, 'POST', ROOT + '/decision-v3', {
+            userId: 'fictional_user_a', characterId: 'miya', candidateId, decision: 'approve',
+        })).status).toBe(404);
+        // A forged characterId in a decision cannot move the candidate's memory.
+        expect((await request(a, 'POST', ROOT + '/decision-v3', { candidateId, characterId: 'koharu', decision: 'approve' })).status).toBe(200);
+        expect((await request(a, 'GET', ROOT + '/character-memories?characterId=koharu')).payload.memories).toEqual([]);
+        const duplicateMemory = await request(a, 'POST', ROOT + '/candidate-v3', body);
+        expect(duplicateMemory.status).toBe(409);
+        expect(duplicateMemory.payload.reason).toBe('duplicate-memory');
+        for (const characterId of ['../fictional_user_b', '../koharu', '/tmp/other', 'miya/koharu']) {
+            expect((await request(a, 'GET', ROOT + '/character-memories?characterId=' + encodeURIComponent(characterId))).status).toBe(400);
+            expect((await request(a, 'POST', ROOT + '/candidate-v3', { ...body, characterId })).status).toBe(400);
+        }
+        // Common memory currently has a reader but no approval UI/API. Seed only
+        // this fixture's common file to test its documented account-wide scope.
+        const commonFile = path.join(fixtureRoot, 'isolated-plugin/runtime-data/users/fictional_user_a/common.json');
+        fs.writeFileSync(commonFile, JSON.stringify({ version: 3, memories: [{ text: 'Fictional A common memory' }] }));
+        const fresh = await newClient();
+        expect((await request(fresh, 'POST', '/api/users/login', {
+            handle: 'fictional_user_a', password: 'fictional-password-a',
+        })).status).toBe(200);
+        const miya = await request(fresh, 'GET', ROOT + '/character-memories?characterId=miya');
+        expect(miya.payload.memories.map(item => [item.text, item.scope])).toEqual([
+            ['Fictional A common memory', 'common'], ['Fictional MIYA-only memory', 'character'],
+        ]);
+        const koharu = await request(fresh, 'GET', ROOT + '/character-memories?characterId=koharu');
+        expect(koharu.payload.memories.map(item => item.text)).toEqual(['Fictional A common memory']);
+        expect((await request(b, 'GET', ROOT + '/character-memories?characterId=miya&userId=fictional_user_a')).payload.memories).toEqual([]);
+        expect((await request(b, 'GET', ROOT + '/character-memories?characterId=koharu&userId=fictional_user_a')).payload.memories).toEqual([]);
+    }, 45000);
+
     test('accounts disabled: the DEFAULT_USER cannot read, queue or approve memories', async () => {
         await startFixture(false);
         const client = await newClient();

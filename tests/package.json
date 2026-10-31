@@ -7,7 +7,8 @@
         "test:unit": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.json",
         "test:e2e": "playwright test",
         "lint": "eslint \"**/*.js\" ./*.js",
-        "lint:fix": "eslint \"**/*.js\" ./*.js --fix"
+        "lint:fix": "eslint \"**/*.js\" ./*.js --fix",
+        "test:e2e:miya": "playwright test --config playwright.miya.config.js"
     },
     "dependencies": {
         "@playwright/test": "^1.56.1",

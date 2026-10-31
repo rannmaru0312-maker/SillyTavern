@@ -82,3 +82,10 @@ jobs:
 
       - name: Run unit tests
         run: npm run test:unit --prefix tests
+
+      - name: Install Chromium for isolated UI tests
+        run: npx --no-install playwright install --with-deps chromium
+        working-directory: tests
+
+      - name: Run isolated MIYA UI tests with local AI mock
+        run: npm run test:e2e:miya --prefix tests
