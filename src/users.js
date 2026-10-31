@@ -8,6 +8,7 @@ import { Buffer } from 'node:buffer';
 
 // Express and other dependencies
 import storage from 'node-persist';
+import { issueAccountSession, isAccountSessionActive, extendAccountSession, pruneExpiredAccountSessions } from './account-sessions.js';
 import express from 'express';
 import mime from 'mime-types';
 import archiver from 'archiver';
@@ -562,6 +563,7 @@ export async function initUserStorage(dataRoot) {
     });
 
     const keys = await getAllUserHandles();
+    await pruneExpiredAccountSessions();
 
     // If there are no users, create the default user
     if (keys.length === 0) {
@@ -787,9 +789,8 @@ async function singleUserLogin(request) {
     const userHandles = await getAllUserHandles();
     if (userHandles.length === 1) {
         const user = await storage.getItem(toKey(userHandles[0]));
-        if (user && !user.password) {
-            request.session.handle = userHandles[0];
-            request.session.version = getAccountVersion(user);
+        if (user && user.enabled && !user.password) {
+            await issueAccountSession(request, user.handle, getAccountVersion(user), getSessionCookieAge());
             return true;
         }
     }
@@ -883,8 +884,7 @@ async function headerUserLogin(request, header = 'Remote-User') {
         if (remoteUser.toLowerCase() === userHandle) {
             const user = await storage.getItem(toKey(userHandle));
             if (user && user.enabled) {
-                request.session.handle = userHandle;
-                request.session.version = getAccountVersion(user);
+                await issueAccountSession(request, user.handle, getAccountVersion(user), getSessionCookieAge());
                 return true;
             }
         }
@@ -925,8 +925,7 @@ async function basicUserLogin(request) {
             const user = await storage.getItem(toKey(userHandle));
             // Verify pass again here just to be sure
             if (user && user.enabled && user.password && user.password === getPasswordHash(password, user.salt)) {
-                request.session.handle = userHandle;
-                request.session.version = getAccountVersion(user);
+                await issueAccountSession(request, user.handle, getAccountVersion(user), getSessionCookieAge());
                 return true;
             }
         }
@@ -969,16 +968,25 @@ export async function setUserDataMiddleware(request, response, next) {
         return response.sendStatus(500);
     }
 
-    // If user accounts are enabled, get the user from the session
-    let handle = request.session?.handle;
-
-    // If we have the only user and it's not password protected, use it
-    if (!handle) {
-        return next();
-    }
-
+    // Require a server-side record even for a correctly signed cookie.
+    // Old stateless cookies must log in again; they cannot be revoked safely.
+    const handle = request.session.handle;
+    if (!handle) return next();
     /** @type {User} */
-    const user = await storage.getItem(toKey(handle));
+    let user;
+    try {
+        if (!await isAccountSessionActive(request, handle)) {
+            request.session = {};
+            return next();
+        }
+        user = await storage.getItem(toKey(handle));
+    } catch {
+        // Express 4 does not forward rejected async middleware promises.
+        // Preserve the cookie for recovery, but never authenticate this request.
+        delete request.user;
+        console.error('Account session storage is unavailable');
+        return response.sendStatus(503);
+    }
 
     if (!user) {
         console.error('User not found:', handle);
@@ -1008,14 +1016,42 @@ export async function setUserDataMiddleware(request, response, next) {
     request.user = {
         profile: user,
         directories: directories,
+        // This flag is issued only after verifying the account version and
+        // its active, server-backed signed session (never DEFAULT_USER).
+        accountSessionValidated: true,
     };
 
     // Touch the session if loading the home page
     if (request.method === 'GET' && request.path === '/') {
-        request.session.touch = Date.now();
+        if (!await touchAccountSession(request, response)) return;
     }
 
     return next();
+}
+
+/**
+ * Persist renewal before changing the cookie, with an Express 4 error boundary.
+ * @param {import('express').Request} request Request object
+ * @param {import('express').Response} response Response object
+ * @returns {Promise<boolean>} Whether renewal succeeded
+ */
+export async function touchAccountSession(request, response) {
+    try {
+        if (ENABLE_ACCOUNTS && (!request.user?.accountSessionValidated
+            || !await extendAccountSession(request, request.user.profile.handle, getSessionCookieAge()))) {
+            delete request.user;
+            request.session = null;
+            response.sendStatus(403);
+            return false;
+        }
+        if (request.session) request.session.touch = Date.now();
+        return true;
+    } catch {
+        delete request.user;
+        console.error('Account session storage is unavailable');
+        response.sendStatus(503);
+        return false;
+    }
 }
 
 /**

@@ -2,6 +2,8 @@ import { eventSource, event_types } from '../../../events.js';
 import { getContext } from '../../../extensions.js';
 import { detectMemoryCandidate } from './candidate-rules.js';
 
+const CANDIDATES_CHANGED = 'miya-memory-candidates-changed';
+
 // 会話イベントと本文取得の確認用。記憶データは変更しない
 function logLatestMessage(eventLabel) {
     try {
@@ -98,6 +100,7 @@ eventSource.on(event_types.MESSAGE_SENT, (messageIndex) => {
                         throw new Error('登録APIエラー: ' + response.status);
                     }
 
+                    document.dispatchEvent(new Event(CANDIDATES_CHANGED));
                     console.log('[MIYA Memory] 記憶候補を承認待ちに登録しました');
                 } catch (error) {
                     console.error('[MIYA Memory] 記憶候補の登録失敗:', error);
@@ -293,6 +296,7 @@ eventSource.on(event_types.MESSAGE_RECEIVED, () => {
             ? '▼ 記憶管理'
             : '▶ 記憶管理';
         toggleButton.setAttribute('aria-expanded', String(isOpen));
+        if (isOpen) void refreshMemoryPanel();
     });
 
         panel.append(title, toggleButton, resetButton, content);
@@ -403,154 +407,140 @@ eventSource.on(event_types.MESSAGE_RECEIVED, () => {
         return result;
     }
 
-    try {
-        const response = await fetch('/api/plugins/miya-memory/decisions-v3', { credentials: 'same-origin' });
+    let refreshGeneration = 0;
+    async function refreshMemoryPanel() {
+        const generation = ++refreshGeneration;
+        try {
+            const response = await fetch('/api/plugins/miya-memory/decisions-v3', { credentials: 'same-origin' });
 
-        if (!response.ok) {
-            throw new Error('HTTP ' + response.status);
-        }
+            if (!response.ok) {
+                throw new Error('HTTP ' + response.status);
+            }
 
-        const data = await response.json();
+            const data = await response.json();
 
-        if (!Array.isArray(data.pending)) {
-            throw new Error('記憶候補の形式が正しくありません');
-        }
+            if (!Array.isArray(data.pending)) {
+                throw new Error('記憶候補の形式が正しくありません');
+            }
 
-        const decisionsResponse = await fetch('/api/plugins/miya-memory/decisions-v3', { credentials: 'same-origin' });
+            const decisionsData = data;
 
-        if (!decisionsResponse.ok) {
-            throw new Error('保存済み判定の取得失敗（HTTP ' + decisionsResponse.status + '）');
-        }
+            if (!Array.isArray(decisionsData.decisions)) {
+                throw new Error('保存済み判定の形式が正しくありません');
+            }
 
-        const decisionsData = await decisionsResponse.json();
+            // A slower previous request must not overwrite a newer snapshot.
+            if (generation !== refreshGeneration) return;
+            list.replaceChildren();
 
-        if (!Array.isArray(decisionsData.decisions)) {
-            throw new Error('保存済み判定の形式が正しくありません');
-        }
-
-        const savedDecisions = new Map(
-            decisionsData.decisions.map(item => [item.candidateId, item.decision])
-        );
-
-
-        // MIYA_MEMORY_COUNTERS_V1
-        // 保留中も100件の登録枠を使用する
-        function displayMemoryCounters(current) {
-            const entries = current.pending.filter(
-                item => item.status === 'pending'
+            const savedDecisions = new Map(
+                decisionsData.decisions.map(item => [item.candidateId, item.decision])
             );
 
-            const decidedIds = new Set(
-                current.decisions
-                    .filter(item =>
-                        item.decision === 'approve' ||
-                        item.decision === 'hold'
-                    )
-                    .map(item => item.candidateId)
-            );
 
-            const used = entries.length;
-            const untreated = entries.filter(
-                item => !decidedIds.has(item.id)
-            ).length;
-
-            message.textContent =
-                `候補枠使用：${used} / 100件｜` +
-                `未処理：${untreated}件｜` +
-                `登録可能：${Math.max(0, 100 - used)}件` +
-                (used === 0 ? '｜記憶候補はありません' : '');
-        }
-
-        async function refreshMemoryCounters() {
-            try {
-                const response = await fetch(
-                    '/api/plugins/miya-memory/decisions-v3',
-                    { credentials: 'same-origin' }
+            // MIYA_MEMORY_COUNTERS_V1
+            // 保留中も100件の登録枠を使用する
+            function displayMemoryCounters(current) {
+                const entries = current.pending.filter(
+                    item => item.status === 'pending'
                 );
-                if (!response.ok) throw new Error('HTTP ' + response.status);
 
-                const current = await response.json();
-                if (!Array.isArray(current.pending) ||
-                    !Array.isArray(current.decisions)) {
-                    throw new Error('件数データの形式が不正です');
+                const decidedIds = new Set(
+                    current.decisions
+                        .filter(item =>
+                            item.decision === 'approve' ||
+                            item.decision === 'hold'
+                        )
+                        .map(item => item.candidateId)
+                );
+
+                const used = entries.length;
+                const untreated = entries.filter(
+                    item => !decidedIds.has(item.id)
+                ).length;
+
+                message.textContent =
+                    `候補枠使用：${used} / 100件｜` +
+                    `未処理：${untreated}件｜` +
+                    `登録可能：${Math.max(0, 100 - used)}件` +
+                    (used === 0 ? '｜記憶候補はありません' : '');
+            }
+
+            displayMemoryCounters(data);
+
+            for (const memory of data.pending) {
+                if (savedDecisions.get(memory.id) === 'approve') continue;
+
+                const item = document.createElement('li');
+
+                const text = document.createElement('div');
+                text.textContent = memory.text;
+
+                const reason = document.createElement('div');
+                reason.textContent = '判定理由：' + memory.reason;
+
+                const approveButton = document.createElement('button');
+                approveButton.textContent = '承認';
+
+                const holdButton = document.createElement('button');
+                holdButton.textContent = '保留';
+
+                const status = document.createElement('div');
+                const savedDecision = savedDecisions.get(memory.id);
+
+                if (savedDecision === 'approve' || savedDecision === 'hold') {
+                    status.textContent = savedDecision === 'approve'
+                        ? '承認済み（テスト保存）'
+                        : '保留中';
+
+                    approveButton.disabled = savedDecision === "approve";
+                    holdButton.disabled = true;
+                } else {
+                    status.textContent = memory.status === 'pending' ? '承認待ち' : memory.status;
                 }
 
-                displayMemoryCounters(current);
-            } catch (error) {
-                console.error('[MIYA Memory] 件数更新失敗:', error);
-                message.textContent = '件数を更新できませんでした';
-            }
-        }
+                async function handleDecision(decision) {
+                    approveButton.disabled = true;
+                    holdButton.disabled = true;
+                    status.textContent = '保存中...';
 
-        displayMemoryCounters(data);
+                    try {
+                        await saveDecision(memory.id, decision);
+                        void refreshMemoryPanel();
 
-        for (const memory of data.pending) {
-            if (savedDecisions.get(memory.id) === 'approve') continue;
-
-            const item = document.createElement('li');
-
-            const text = document.createElement('div');
-            text.textContent = memory.text;
-
-            const reason = document.createElement('div');
-            reason.textContent = '判定理由：' + memory.reason;
-
-            const approveButton = document.createElement('button');
-            approveButton.textContent = '承認';
-
-            const holdButton = document.createElement('button');
-            holdButton.textContent = '保留';
-
-            const status = document.createElement('div');
-            const savedDecision = savedDecisions.get(memory.id);
-
-            if (savedDecision === 'approve' || savedDecision === 'hold') {
-                status.textContent = savedDecision === 'approve'
-                    ? '承認済み（テスト保存）'
-                    : '保留中';
-
-                approveButton.disabled = savedDecision === "approve";
-                holdButton.disabled = true;
-            } else {
-                status.textContent = memory.status === 'pending' ? '承認待ち' : memory.status;
-            }
-
-            async function handleDecision(decision) {
-                approveButton.disabled = true;
-                holdButton.disabled = true;
-                status.textContent = '保存中...';
-
-                try {
-                    await saveDecision(memory.id, decision);
-                    void refreshMemoryCounters();
-
-                    if (decision === 'approve') {
-                        item.remove();
-                    } else {
-                        status.textContent = '保留中';
+                        if (decision === 'approve') {
+                            item.remove();
+                        } else {
+                            status.textContent = '保留中';
+                            approveButton.disabled = false;
+                            holdButton.disabled = true;
+                        }
+                    } catch (error) {
+                        status.textContent = 'エラー：' + error.message;
                         approveButton.disabled = false;
-                        holdButton.disabled = true;
+                        holdButton.disabled = savedDecision === "hold";
+                        console.error('記憶保存エラー：', error);
                     }
-                } catch (error) {
-                    status.textContent = 'エラー：' + error.message;
-                    approveButton.disabled = false;
-                    holdButton.disabled = savedDecision === "hold";
-                    console.error('記憶保存エラー：', error);
                 }
+
+                approveButton.addEventListener('click', () => handleDecision('approve'));
+                holdButton.addEventListener('click', () => handleDecision('hold'));
+
+                item.append(text, reason, approveButton, holdButton, status);
+                list.appendChild(item);
             }
 
-            approveButton.addEventListener('click', () => handleDecision('approve'));
-            holdButton.addEventListener('click', () => handleDecision('hold'));
 
-            item.append(text, reason, approveButton, holdButton, status);
-            list.appendChild(item);
+
+            console.log('MIYA & KOHARU 記憶管理：保存API接続準備完了');
+        } catch (error) {
+            if (generation !== refreshGeneration) return;
+            list.replaceChildren();
+            message.textContent = '記憶候補の読み込みに失敗しました';
+            console.error('MIYA & KOHARU 記憶管理：', error);
         }
-
-
-
-        console.log('MIYA & KOHARU 記憶管理：保存API接続準備完了');
-    } catch (error) {
-        message.textContent = '記憶候補の読み込みに失敗しました';
-        console.error('MIYA & KOHARU 記憶管理：', error);
     }
+
+    document.addEventListener(CANDIDATES_CHANGED, refreshMemoryPanel);
+    await refreshMemoryPanel();
 })();

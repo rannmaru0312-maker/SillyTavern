@@ -1,8 +1,10 @@
 const path = require('node:path');
 
-module.exports = function addCandidateV3Api(router) {
+module.exports = function addCandidateV3Api(router, authenticatedMemoryUserId) {
     router.post('/candidate-v3', (req, res) => {
-        const userId = req.user?.profile?.handle;
+        const userId = typeof authenticatedMemoryUserId === 'function'
+            ? authenticatedMemoryUserId(req)
+            : null;
         const validId = /^[a-zA-Z0-9_-]{1,64}$/;
 
         if (typeof userId !== 'string' || !validId.test(userId)) {
