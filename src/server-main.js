@@ -34,6 +34,7 @@ import {
     migrateUserData,
     requireLoginMiddleware,
     setUserDataMiddleware,
+    touchAccountSession,
     shouldRedirectToLogin,
     cleanUploads,
     getSessionCookieAge,
@@ -246,9 +247,9 @@ app.use('/api/users', usersPublicRouter);
 
 // Everything below this line requires authentication
 app.use(requireLoginMiddleware);
-app.post('/api/ping', (request, response) => {
+app.post('/api/ping', async (request, response) => {
     if (request.query.extend && request.session) {
-        request.session.touch = Date.now();
+        if (!await touchAccountSession(request, response)) return;
     }
 
     response.sendStatus(204);

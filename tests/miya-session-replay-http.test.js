@@ -90,7 +90,7 @@ async function send(jar, method, endpoint, body, options = {}) {
     } catch {
         payload = raw;
     }
-    return { status: result.status, payload };
+    return { status: result.status, payload, setCookies: result.headers.getSetCookie() };
 }
 
 async function openJar() {
@@ -145,6 +145,101 @@ afterEach(async () => {
 });
 
 describe('account sessions: live HTTP replay and expiry', () => {
+    test.each([
+        ['session read', 'getItem', 'auth-session:v1:', false],
+        ['account read', 'getItem', 'user:', false],
+        ['expired session deletion', 'removeItem', 'auth-session:v1:', true],
+    ])('%s failure denies memory access, survives and recovers', async (_label, operation, prefix, expire) => {
+        await start(60);
+        const jar = await openJar();
+        expect((await login(jar)).status).toBe(200);
+        const memoryRoot = '/api/plugins/miya-memory';
+        const created = await send(jar, 'POST', memoryRoot + '/candidate-v3', {
+            characterId: 'fictional_character', text: 'Fictional private memory',
+        });
+        expect(created.status).toBe(201);
+        expect((await send(jar, 'POST', memoryRoot + '/decision-v3', {
+            candidateId: created.payload.candidate.id, decision: 'approve',
+        })).status).toBe(200);
+        const snapshot = signedCookieSnapshot(jar);
+        if (expire) fs.writeFileSync(path.join(fixtureRoot, 'clock.json'), JSON.stringify(61000));
+        fs.writeFileSync(path.join(fixtureRoot, 'fault.json'), JSON.stringify({ operation, prefix }));
+        for (const endpoint of ['/api/users/me', '/api/plugins/miya-memory/character-memories?characterId=fictional_character&userId=fictional_other']) {
+            const result = await send(jar, 'GET', endpoint);
+            expect(result.status).toBe(503);
+            expect(result.payload).toBe('Service Unavailable');
+        }
+        expect(child.exitCode).toBeNull();
+        fs.unlinkSync(path.join(fixtureRoot, 'fault.json'));
+        expect((await send(snapshot, 'GET', '/api/users/me')).status).toBe(expire ? 403 : 200);
+        const fresh = await openJar();
+        expect((await login(fresh)).status).toBe(200);
+        const restored = await send(fresh, 'GET', memoryRoot + '/character-memories?characterId=fictional_character');
+        expect(restored.status).toBe(200);
+        expect(restored.payload.memories.map(item => item.text)).toEqual(['Fictional private memory']);
+    }, 45000);
+
+    test.each([['POST', '/api/ping?extend=1'], ['GET', '/']])('%s %s extends both session lifetimes', async (method, endpoint) => {
+        await start(60);
+        const jar = await openJar();
+        expect((await login(jar)).status).toBe(200);
+        fs.writeFileSync(path.join(fixtureRoot, 'clock.json'), JSON.stringify(30000));
+        const extended = await send(jar, method, endpoint);
+        expect(extended.status).toBe(method === 'POST' ? 204 : 200);
+        expect(extended.setCookies.some(cookie => cookie.includes('expires='))).toBe(true);
+        fs.writeFileSync(path.join(fixtureRoot, 'clock.json'), JSON.stringify(61000));
+        expect((await send(jar, 'GET', '/api/users/me')).status).toBe(200);
+        fs.writeFileSync(path.join(fixtureRoot, 'clock.json'), JSON.stringify(91000));
+        expect((await send(jar, 'GET', '/api/users/me')).status).toBe(403);
+    }, 45000);
+
+    test('logout and expiration cannot be undone by extension', async () => {
+        await start(60);
+        const jar = await openJar();
+        expect((await login(jar)).status).toBe(200);
+        const revoked = signedCookieSnapshot(jar);
+        expect((await send(jar, 'POST', '/api/users/logout')).status).toBe(204);
+        expect((await send(revoked, 'POST', '/api/ping?extend=1')).status).toBe(403);
+        const fresh = await openJar();
+        expect((await login(fresh)).status).toBe(200);
+        const expired = signedCookieSnapshot(fresh);
+        fs.writeFileSync(path.join(fixtureRoot, 'clock.json'), JSON.stringify(61000));
+        expect((await send(fresh, 'POST', '/api/ping?extend=1')).status).toBe(403);
+        expect((await send(expired, 'GET', '/api/users/me')).status).toBe(403);
+    }, 45000);
+
+    test.each([['getItem', 1], ['setItem', 0]])('extension %s failure returns 503 without renewing cookie and recovers', async (operation, skip) => {
+        await start(60);
+        const jar = await openJar();
+        expect((await login(jar)).status).toBe(200);
+        fs.writeFileSync(path.join(fixtureRoot, 'clock.json'), JSON.stringify(30000));
+        fs.writeFileSync(path.join(fixtureRoot, 'fault.json'), JSON.stringify({ operation, prefix: 'auth-session:v1:', skip }));
+        const failed = await send(jar, 'POST', '/api/ping?extend=1');
+        expect(failed.status).toBe(503);
+        expect(failed.setCookies).toEqual([]);
+        expect(child.exitCode).toBeNull();
+        fs.unlinkSync(path.join(fixtureRoot, 'fault.json'));
+        expect((await send(jar, 'POST', '/api/ping?extend=1')).status).toBe(204);
+        fs.writeFileSync(path.join(fixtureRoot, 'clock.json'), JSON.stringify(61000));
+        expect((await send(jar, 'GET', '/api/users/me')).status).toBe(200);
+    }, 45000);
+
+    test('sessionTimeout=0 preserves browser-session cookies and logout revocation', async () => {
+        await start(0);
+        const jar = await openJar();
+        const loggedIn = await login(jar);
+        expect(loggedIn.status).toBe(200);
+        expect(loggedIn.setCookies.every(cookie => !/expires=|max-age=/i.test(cookie))).toBe(true);
+        fs.writeFileSync(path.join(fixtureRoot, 'clock.json'), JSON.stringify(86400000));
+        const extended = await send(jar, 'POST', '/api/ping?extend=1');
+        expect(extended.status).toBe(204);
+        expect(extended.setCookies.every(cookie => !/expires=|max-age=/i.test(cookie))).toBe(true);
+        expect((await send(jar, 'GET', '/api/users/me')).status).toBe(200);
+        const snapshot = signedCookieSnapshot(jar);
+        expect((await send(jar, 'POST', '/api/users/logout')).status).toBe(204);
+        expect((await send(snapshot, 'POST', '/api/ping?extend=1')).status).toBe(403);
+    }, 45000);
+
     test('logout revokes only this device; replayed signed cookie cannot read private data', async () => {
         await start();
         const first = await openJar();

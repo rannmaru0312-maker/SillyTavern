@@ -8,7 +8,7 @@ import { Buffer } from 'node:buffer';
 
 // Express and other dependencies
 import storage from 'node-persist';
-import { issueAccountSession, isAccountSessionActive, pruneExpiredAccountSessions } from './account-sessions.js';
+import { issueAccountSession, isAccountSessionActive, extendAccountSession, pruneExpiredAccountSessions } from './account-sessions.js';
 import express from 'express';
 import mime from 'mime-types';
 import archiver from 'archiver';
@@ -972,13 +972,21 @@ export async function setUserDataMiddleware(request, response, next) {
     // Old stateless cookies must log in again; they cannot be revoked safely.
     const handle = request.session.handle;
     if (!handle) return next();
-    if (!await isAccountSessionActive(request, handle)) {
-        request.session = {};
-        return next();
-    }
-
     /** @type {User} */
-    const user = await storage.getItem(toKey(handle));
+    let user;
+    try {
+        if (!await isAccountSessionActive(request, handle)) {
+            request.session = {};
+            return next();
+        }
+        user = await storage.getItem(toKey(handle));
+    } catch {
+        // Express 4 does not forward rejected async middleware promises.
+        // Preserve the cookie for recovery, but never authenticate this request.
+        delete request.user;
+        console.error('Account session storage is unavailable');
+        return response.sendStatus(503);
+    }
 
     if (!user) {
         console.error('User not found:', handle);
@@ -1015,10 +1023,35 @@ export async function setUserDataMiddleware(request, response, next) {
 
     // Touch the session if loading the home page
     if (request.method === 'GET' && request.path === '/') {
-        request.session.touch = Date.now();
+        if (!await touchAccountSession(request, response)) return;
     }
 
     return next();
+}
+
+/**
+ * Persist renewal before changing the cookie, with an Express 4 error boundary.
+ * @param {import('express').Request} request Request object
+ * @param {import('express').Response} response Response object
+ * @returns {Promise<boolean>} Whether renewal succeeded
+ */
+export async function touchAccountSession(request, response) {
+    try {
+        if (ENABLE_ACCOUNTS && (!request.user?.accountSessionValidated
+            || !await extendAccountSession(request, request.user.profile.handle, getSessionCookieAge()))) {
+            delete request.user;
+            request.session = null;
+            response.sendStatus(403);
+            return false;
+        }
+        if (request.session) request.session.touch = Date.now();
+        return true;
+    } catch {
+        delete request.user;
+        console.error('Account session storage is unavailable');
+        response.sendStatus(503);
+        return false;
+    }
 }
 
 /**
