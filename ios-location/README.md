@@ -1,18 +1,25 @@
-# MIYA Location iOS integration (draft)
-iPhone geofence visit logging prototype, isolated from existing SillyTavern runtime.
-Privacy: no embedded real-world home/work coordinates, no automatic network transmission.
-Do not merge or enable without signed iPhone testing and data-protection review.
+# MIYA Location — iOS geofence prototype (Draft PR #29)
 
-## Current status
-- XcodeGen project configuration and GitHub Actions unsigned iOS Simulator build workflow are staged in this branch.
-- SwiftUI/ CoreLocation source files from the local v0.5 prototype must be integrated before CI can build successfully.
-- GitHub Actions workflow has not been run. No signed IPA, iPhone installation, server import API, or Google Drive sync.
-- A macOS runner may consume paid minutes; verify available quotas before manual workflow dispatch.
-- Existing user/character memory and authentication are untouched.
+## Implemented in this branch
+- SwiftUI app with place registration (manual coordinates or current location), local JSON persistence, event list and explicit CSV export
+- CoreLocation circular region monitoring with Always permission requirement, stop/delete controls, event deduplication, user confirmation marker
+- XcodeGen iOS project and unsigned iOS Simulator build workflow
+- No hard-coded home/work coordinates; no background uploads or external services; location remains on-device
 
-## Required next steps
-1. Add the verified v0.5 Swift source files under ios-location/MIYALocation.
-2. Run iOS Simulator build and fix compile errors.
-3. Test geofence callbacks, permission revocation, app restart, timestamp correction, local export.
-4. Design opt-in authenticated import with per-user isolation and idempotent event IDs.
-5. Verify seven-day Google Drive save with read-back before notifying the user.
+## Not yet verified / not complete
+- GitHub Actions iOS build has **not run or passed**. Check macOS runner billing/quota before starting.
+- iPhone installation requires Apple code signing and physical-device testing; not available from Windows alone.
+- Arrival/departure notifications are approximate and may be delayed or missed; no guarantee of indoor entrance detection.
+- Google Drive seven-day export and authenticated MIYA & KOHARU backend import **not implemented**. CSV export requires user action.
+- No end-to-end tests, background permission tests, or iOS device tests have passed.
+- Existing app, production systems, auth, and memory are untouched. Keep this PR Draft until verified.
+
+## Before production
+1. Run XcodeGen + Xcode build on macOS (only with confirmed free CI quota).
+2. Fix compile failures; test foreground/background location permission and revocation.
+3. Add deterministic tests for duplicate events, region-limit, data persistence, and privacy.
+4. Implement opt-in authenticated import with user isolation, event idempotency, and audit trail.
+5. Integrate verified weekly Google Drive write/readback, error retry, and success-only notification.
+6. Test on real iPhone with the owner's consent; review battery and privacy settings.
+
+No credentials, real addresses, or private diary contents should enter this repository.
