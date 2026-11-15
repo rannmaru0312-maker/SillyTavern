@@ -121,6 +121,27 @@ function register(router) {
         }
     });
 
+    router.post('/visits/delete-v1', (req, res) => {
+        if (!enabled()) return res.status(404).json({ error: 'Feature not enabled' });
+        const handle = authenticatedUser(req);
+        if (!handle) return res.status(403).json({ error: 'Authenticated account required' });
+        if (!req.body || Object.keys(req.body).length !== 1 ||
+            req.body.confirm !== 'DELETE_MY_VISIT_EVENTS') {
+            return res.status(400).json({ error: 'Explicit deletion confirmation required' });
+        }
+        try {
+            const file = storagePath(handle);
+            const count = withFileLock(file, () => {
+                const store = readStore(handle);
+                if (fs.existsSync(file)) fs.unlinkSync(file);
+                return store.events.length;
+            });
+            return res.status(200).json({ success: true, deleted: count });
+        } catch {
+            return res.status(500).json({ error: 'Could not delete visit events' });
+        }
+    });
+
     router.get('/visits/export-v1', (req, res) => {
         if (!enabled()) return res.status(404).json({ error: 'Feature not enabled' });
         const handle = authenticatedUser(req);
