@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var longitude = ""
     @State private var exportURL: URL?
     @State private var showDelete = false
+    @State private var showEraseServer = false
     var body: some View {
         NavigationStack {
             Form {
@@ -107,6 +108,11 @@ struct ContentView: View {
                     }
                     .disabled(!sync.consentToUpload || !sync.isSignedIn ||
                               sync.isBusy || recorder.events.isEmpty)
+                    if sync.isSignedIn {
+                        Button("サーバー上の訪問記録を削除", role: .destructive) {
+                            showEraseServer = true
+                        }.disabled(sync.isBusy)
+                    }
                     if sync.isBusy { ProgressView("確認中") }
                     Text(sync.statusMessage).font(.caption)
                     Text("同期は手動操作のみです。iPhoneのアプリを閉じている間の送信や、Googleドライブへの保存はまだ行いません。")
@@ -123,6 +129,14 @@ struct ContentView: View {
             .navigationTitle("みやの生活記録")
             .confirmationDialog("すべての地点と記録を削除しますか？", isPresented: $showDelete) {
                 Button("完全削除", role: .destructive) { recorder.deleteAll() }
+            }
+            .alert("サーバーの訪問記録をすべて削除しますか？", isPresented: $showEraseServer) {
+                Button("削除する", role: .destructive) {
+                    Task { await sync.eraseRemoteVisits() }
+                }
+                Button("中止", role: .cancel) {}
+            } message: {
+                Text("ログイン中の本人アカウントのサーバー記録を削除します。iPhone内の記録は残るため、後から送信すると再登録されます。")
             }
         }
     }
