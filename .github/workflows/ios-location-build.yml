@@ -1,0 +1,22 @@
+name: MIYA Location iOS simulator build
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'ios-location/**'
+      - '.github/workflows/ios-location-build.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: cd ios-location && xcodegen generate
+      - name: Build unsigned simulator target
+        run: |
+          xcodebuild -project ios-location/MIYALocation.xcodeproj -scheme MIYALocation -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
