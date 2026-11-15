@@ -4,7 +4,7 @@ import Foundation
 /// chosen with the iOS document picker. It verifies File Provider readback, NOT
 /// a completed Google Drive cloud upload.
 enum VisitArchiveFileMirror {
-    struct Receipt {
+    struct Receipt: Sendable {
         let copied: Int
         let existingVerified: Int
         let filesInspected: Int
@@ -73,7 +73,8 @@ enum VisitArchiveFileMirror {
     /// This is strictly an external File Provider copy; it cannot confirm
     /// server-side Google Drive durability, owner or folder permissions.
     static func copyVerifiedArchives(from source: URL, to destination: URL,
-                                     maxFiles: Int = 24) throws -> Receipt {
+                                     maxFiles: Int = 24,
+                                     shouldCancel: () -> Bool = { false }) throws -> Receipt {
         guard maxFiles > 0 && maxFiles <= 100,
               destination.isFileURL else { throw Failure.invalidDirectory }
         var isDirectory: ObjCBool = false
@@ -95,6 +96,9 @@ enum VisitArchiveFileMirror {
         var checked = 0
         var pending = false
         for name in all {
+            // A user may revoke consent while a slow File Provider is active.
+            // Stop at the next file boundary; never claim a partial batch as complete.
+            if shouldCancel() { throw CancellationError() }
             let src = source.appendingPathComponent(name)
             let dst = destination.appendingPathComponent(name)
             let data = try Data(contentsOf: src)
