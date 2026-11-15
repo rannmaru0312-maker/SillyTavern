@@ -9,6 +9,7 @@ struct ContentView: View {
     @StateObject private var sync = VisitSyncClient()
     @StateObject private var folderSync = VisitArchiveFolderSync()
     @State private var showMirrorFolderPicker = false
+    @State private var showAdvancedServerSync = false
     @State private var serverURL = ""
     @State private var loginHandle = ""
     @State private var loginPassword = ""
@@ -81,7 +82,8 @@ struct ContentView: View {
                     }
                     Button("CSVファイルを作成") { exportURL = recorder.exportCSV() }
                 }
-                Section("サーバーへの手動同期（任意）") {
+                if showAdvancedServerSync {
+                    Section("開発用サーバーへの手動同期（任意）") {
                     Text("利用者が許可した場合だけ、登録先の名前・到着/退出種別・推定/確認時刻を送信します。GPS座標や移動経路は送信しません。")
                         .font(.caption)
                     TextField("https://正規サーバーURL", text: $serverURL)
@@ -124,6 +126,7 @@ struct ContentView: View {
                     Text(sync.statusMessage).font(.caption)
                     Text("同期は手動操作のみです。iPhoneのアプリを閉じている間の送信や、Googleドライブへの保存はまだ行いません。")
                         .font(.caption)
+                    }
                 }
                 Section("7日分のGPS記録を書き出す") {
                     DatePicker("対象期間の開始日（日本時間）", selection: $weekStart,
@@ -217,6 +220,8 @@ struct ContentView: View {
                 }
                 Section("プライバシー") {
                     Text("記録は端末内に保存され、サーバーへ自動送信しません。").font(.caption)
+                    Toggle("開発用サーバー接続の設定を表示", isOn: $showAdvancedServerSync)
+                    Text("個人利用では開発用サーバーへの送信設定は不要です。7日ごとの端末内保存と本人選択のファイルアプリ保存を優先します。").font(.caption)
                     Button("全地点・全記録を削除", role: .destructive) { showDelete = true }
                 }
                 if recorder.hasStorageReadError {
