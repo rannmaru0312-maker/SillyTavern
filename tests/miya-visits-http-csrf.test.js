@@ -138,6 +138,37 @@ describe('Visit import: actual HTTP cookies and CSRF middleware (isolated test s
         expect((await request('GET', '/api/plugins/miya-memory/visits/export-v1')).status).toBe(403);
     });
 
+    test('weekly GPS preview is private and refuses unfinished seven-day periods', async () => {
+        const alice = makeClient(port);
+        const bob = makeClient(port);
+        const noSession = await alice('GET', '/api/plugins/miya-memory/visits/week-v1?start=2026-11-08');
+        expect(noSession.status).toBe(403);
+        const tokenA = (await alice('GET', '/csrf-token')).body.token;
+        const tokenB = (await bob('GET', '/csrf-token')).body.token;
+        expect((await alice('POST', '/api/users/login', { handle: 'alice' }, tokenA)).status).toBe(200);
+        expect((await bob('POST', '/api/users/login', { handle: 'bob' }, tokenB)).status).toBe(200);
+        const csrfA = (await alice('GET', '/csrf-token')).body.token;
+        const inWeek = {
+            ...FIXTURE,
+            detected_at: '2026-11-14T01:00:00Z',
+        };
+        const upload = await alice('POST', '/api/plugins/miya-memory/visits/import-v1',
+            { events: [inWeek] }, csrfA);
+        expect(upload.status).toBe(200);
+        const preview = await alice('GET', '/api/plugins/miya-memory/visits/week-v1?start=2026-11-08');
+        expect(preview.status).toBe(200);
+        expect(preview.body.period_start).toBe('2026-11-08');
+        expect(preview.body.events).toHaveLength(1);
+        expect(preview.body.events[0]).toMatchObject({ date: '2026-11-14', time_status: 'gps_estimated' });
+        const other = await bob('GET', '/api/plugins/miya-memory/visits/week-v1?start=2026-11-08');
+        expect(other.status).toBe(200);
+        expect(other.body.events).toEqual([]);
+        const future = await alice('GET', '/api/plugins/miya-memory/visits/week-v1?start=2099-11-08');
+        expect(future.status).toBe(400);
+        const invalid = await alice('GET', '/api/plugins/miya-memory/visits/week-v1?start=2026-02-30');
+        expect(invalid.status).toBe(400);
+    });
+
     test('users with separate session cookies cannot read each other’s visit events', async () => {
         const alice = makeClient(port);
         const bob = makeClient(port);
