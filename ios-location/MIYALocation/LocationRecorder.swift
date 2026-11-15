@@ -39,6 +39,7 @@ struct VisitEvent: Codable, Identifiable {
     private var placesURL: URL { baseURL.appendingPathComponent("places.json") }
     private var eventsURL: URL { baseURL.appendingPathComponent("events.json") }
     private var weeklyArchivesURL: URL { baseURL.appendingPathComponent("weekly-archives", isDirectory: true) }
+    var weeklyArchiveSourceURL: URL { weeklyArchivesURL }
 
     override init() {
         super.init()
