@@ -103,7 +103,7 @@ describe('GPS weekly Drive intake archive validation', () => {
     });
     test('neutralizes user-supplied spreadsheet formulas', () => {
         const x = makeArchive({ events: [{ ...event, placeName: '=HYPERLINK("https://bad.invalid","x")' }] });
-        expect(verify(x).rows[0].location.startsWith("'=")).toBe(true);
+        expect(verify(x).rows[0].location).toMatch(/^'=HYPERLINK/);
     });
     test('rejects old archives with no portable canonical bytes for cloud intake', () => {
         const x = makeArchive();
