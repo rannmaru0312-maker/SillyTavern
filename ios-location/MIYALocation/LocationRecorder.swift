@@ -34,6 +34,7 @@ struct VisitEvent: Codable, Identifiable {
     private let intentKey = "miya-location-intent"
     private let weeklyEnabledKey = "miya-weekly-local-archive-enabled"
     private let weeklyStartKey = "miya-weekly-local-archive-anchor"
+    private let weeklyCursorKey = "miya-weekly-local-archive-next"
     private let baseURL: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     private var placesURL: URL { baseURL.appendingPathComponent("places.json") }
     private var eventsURL: URL { baseURL.appendingPathComponent("events.json") }
@@ -149,9 +150,14 @@ struct VisitEvent: Codable, Identifiable {
     func confirm(_ id: UUID, at date: Date) {
         guard let i = events.firstIndex(where: { $0.id == id }) else { return }
         let old = events
+        let previousTime = events[i].confirmedAt ?? events[i].detectedAt
         events[i].confirmedAt = date
         if !save(events, to: eventsURL) { events = old }
-        else if weeklyArchiveEnabled { refreshWeeklyArchives() }
+        else if weeklyArchiveEnabled {
+            refreshCompletedWeek(containing: previousTime)
+            refreshCompletedWeek(containing: date)
+            refreshWeeklyArchives()
+        }
     }
     func deleteAll() {
         stopMonitoring()
@@ -176,6 +182,7 @@ struct VisitEvent: Codable, Identifiable {
             return
         }
         UserDefaults.standard.set(start.timeIntervalSince1970, forKey: weeklyStartKey)
+        UserDefaults.standard.set(start.timeIntervalSince1970, forKey: weeklyCursorKey)
         UserDefaults.standard.set(true, forKey: weeklyEnabledKey)
         weeklyArchiveEnabled = true
         refreshWeeklyArchives()
@@ -199,17 +206,43 @@ struct VisitEvent: Codable, Identifiable {
             return
         }
         do {
+            let cursor = UserDefaults.standard.double(forKey: weeklyCursorKey)
+            let pending = cursor >= timestamp ? cursor : timestamp
             let report = try VisitLocalWeekArchive.writeCompleted(
-                events: events, anchor: Date(timeIntervalSince1970: timestamp),
+                events: events, anchor: Date(timeIntervalSince1970: pending),
                 now: now, directory: weeklyArchivesURL
             )
-            latestWeeklyArchiveURL = report.lastFile
+            // Advance only after the file(s) have been written and verified.
+            UserDefaults.standard.set(report.nextPeriodStart.timeIntervalSince1970, forKey: weeklyCursorKey)
+            latestWeeklyArchiveURL = report.lastFile ?? latestWeeklyArchiveURL
             weeklyArchiveStatus =
                 "端末内の7日分を照合：新規\(report.created)件、既存確認済み\(report.alreadyVerified)件。" +
                 (report.hasMoreCompletedPeriods ? "未処理の期間が残っています。もう一度確認してください。" : "") +
                 " Googleドライブへはまだ保存していません。"
         } catch {
             weeklyArchiveStatus = "週次保管を確認できませんでした：\(error.localizedDescription)"
+        }
+    }
+
+    /// Refresh historical weeks after a user correction. Prior snapshots stay
+    /// on disk as immutable revisions, so editing a past date is never destructive.
+    private func refreshCompletedWeek(containing timestamp: Date) {
+        guard weeklyArchiveEnabled, !unreadableFiles.contains(eventsURL.lastPathComponent),
+              let calendar = VisitWeekExporter.japanCalendar() else { return }
+        let anchorEpoch = UserDefaults.standard.double(forKey: weeklyStartKey)
+        guard anchorEpoch >= 946_684_800 else { return }
+        let anchorDay = calendar.startOfDay(for: Date(timeIntervalSince1970: anchorEpoch))
+        let eventDay = calendar.startOfDay(for: timestamp)
+        let days = calendar.dateComponents([.day], from: anchorDay, to: eventDay).day ?? -1
+        guard days >= 0,
+              let weekStart = calendar.date(byAdding: .day, value: (days / 7) * 7, to: anchorDay) else { return }
+        do {
+            let report = try VisitLocalWeekArchive.writeCompleted(
+                events: events, anchor: weekStart, directory: weeklyArchivesURL, maxPeriods: 1
+            )
+            if let file = report.lastFile { latestWeeklyArchiveURL = file }
+        } catch {
+            weeklyArchiveStatus = "過去の週のバックアップ照合に失敗しました：\(error.localizedDescription)"
         }
     }
 
