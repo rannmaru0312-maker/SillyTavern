@@ -93,6 +93,27 @@ describe('MIYA opt-in visit import', () => {
         expect(extra.statusCode).toBe(400);
         expect(get(router, user('alice')).body.events).toHaveLength(1);
     });
+    test('server-side delete is explicit, account-scoped, and idempotent', () => {
+        const alice = user('alice');
+        const bob = user('bob');
+        expect(send(router, { ...alice, body: { events: [EVENT] } }).statusCode).toBe(200);
+        expect(send(router, { ...bob, body: { events: [EVENT] } }).statusCode).toBe(200);
+        const erase = router.routes.get('POST /visits/delete-v1');
+        const invalid = reply();
+        erase({ ...alice, body: { confirm: 'not-yet' } }, invalid);
+        expect(invalid.statusCode).toBe(400);
+        const unauth = reply();
+        erase({ body: { confirm: 'DELETE_MY_VISIT_EVENTS' } }, unauth);
+        expect(unauth.statusCode).toBe(403);
+        const okay = reply();
+        erase({ ...alice, body: { confirm: 'DELETE_MY_VISIT_EVENTS' } }, okay);
+        expect(okay.body).toMatchObject({ success: true, deleted: 1 });
+        expect(get(router, alice).body.events).toEqual([]);
+        expect(get(router, bob).body.events).toHaveLength(1);
+        const again = reply();
+        erase({ ...alice, body: { confirm: 'DELETE_MY_VISIT_EVENTS' } }, again);
+        expect(again.body).toMatchObject({ success: true, deleted: 0 });
+    });
     test('bounds batch size and fails closed if storage configuration is missing', () => {
         const excessive = send(router, { ...user('alice'), body: { events: Array(21).fill(EVENT) } });
         expect(excessive.statusCode).toBe(400);
