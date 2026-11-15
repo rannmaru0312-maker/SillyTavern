@@ -23,13 +23,18 @@ struct VisitEvent: Codable, Identifiable {
     @Published private(set) var authorization: CLAuthorizationStatus = .notDetermined
     @Published private(set) var monitoring = false
     @Published var errorMessage: String?
+    @Published private(set) var weeklyArchiveEnabled = UserDefaults.standard.bool(forKey: "miya-weekly-local-archive-enabled")
+    @Published private(set) var weeklyArchiveStatus = "7日ごとの端末内保管は未設定です。Googleドライブへの自動保存ではありません。"
     @Published private(set) var currentLocation: CLLocationCoordinate2D?
     private let manager = CLLocationManager()
     private let prefix = "miya-visit-"
     private let intentKey = "miya-location-intent"
+    private let weeklyEnabledKey = "miya-weekly-local-archive-enabled"
+    private let weeklyStartKey = "miya-weekly-local-archive-anchor"
     private let baseURL: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     private var placesURL: URL { baseURL.appendingPathComponent("places.json") }
     private var eventsURL: URL { baseURL.appendingPathComponent("events.json") }
+    private var weeklyArchivesURL: URL { baseURL.appendingPathComponent("weekly-archives", isDirectory: true) }
 
     override init() {
         super.init()
@@ -39,6 +44,7 @@ struct VisitEvent: Codable, Identifiable {
         events = load([VisitEvent].self, from: eventsURL) ?? []
         monitoring = UserDefaults.standard.bool(forKey: intentKey)
         if !monitoring { stopRegions() } else if authorization == .authorizedAlways { startMonitoring() }
+        if weeklyArchiveEnabled { refreshWeeklyArchives() }
     }
     private func load<T: Decodable>(_ type: T.Type, from url: URL) -> T? {
         guard let data = try? Data(contentsOf: url) else { return nil }
@@ -119,6 +125,7 @@ struct VisitEvent: Codable, Identifiable {
         let old = events
         events[i].confirmedAt = date
         if !save(events, to: eventsURL) { events = old }
+        else if weeklyArchiveEnabled { refreshWeeklyArchives() }
     }
     func deleteAll() {
         stopMonitoring()
@@ -129,6 +136,52 @@ struct VisitEvent: Codable, Identifiable {
         if !save(places, to: placesURL) { places = oldPlaces }
         if !save(events, to: eventsURL) { events = oldEvents }
     }
+    /// Archives completed seven-day periods locally when the app becomes active,
+    /// or after a new event / time confirmation. The OS does not guarantee
+    /// automatic execution at a particular clock time.
+    func enableWeeklyArchives(from date: Date) {
+        guard let calendar = VisitWeekExporter.japanCalendar() else {
+            weeklyArchiveStatus = "日本時間を取得できません"
+            return
+        }
+        let start = calendar.startOfDay(for: date)
+        guard start <= calendar.startOfDay(for: Date()) else {
+            weeklyArchiveStatus = "未来の日付からは開始できません"
+            return
+        }
+        UserDefaults.standard.set(start.timeIntervalSince1970, forKey: weeklyStartKey)
+        UserDefaults.standard.set(true, forKey: weeklyEnabledKey)
+        weeklyArchiveEnabled = true
+        refreshWeeklyArchives()
+    }
+
+    func disableWeeklyArchives() {
+        UserDefaults.standard.set(false, forKey: weeklyEnabledKey)
+        weeklyArchiveEnabled = false
+        weeklyArchiveStatus = "端末内の週次保管を停止しました。以前のバックアップは削除していません。"
+    }
+
+    func refreshWeeklyArchives(now: Date = Date()) {
+        guard weeklyArchiveEnabled else { return }
+        let timestamp = UserDefaults.standard.double(forKey: weeklyStartKey)
+        guard timestamp >= 946_684_800 else {
+            weeklyArchiveStatus = "週次保管の開始日を設定し直してください"
+            return
+        }
+        do {
+            let report = try VisitLocalWeekArchive.writeCompleted(
+                events: events, anchor: Date(timeIntervalSince1970: timestamp),
+                now: now, directory: weeklyArchivesURL
+            )
+            weeklyArchiveStatus =
+                "端末内の7日分を照合：新規\(report.created)件、既存確認済み\(report.alreadyVerified)件。" +
+                (report.hasMoreCompletedPeriods ? "未処理の期間が残っています。もう一度確認してください。" : "") +
+                " Googleドライブへはまだ保存していません。"
+        } catch {
+            weeklyArchiveStatus = "週次保管を確認できませんでした：\(error.localizedDescription)"
+        }
+    }
+
     /// User-triggered archive of event IDs and timestamps; exact coordinates are excluded.
     func exportEventArchive() -> URL? {
         do {
@@ -187,6 +240,7 @@ struct VisitEvent: Codable, Identifiable {
         events.append(VisitEvent(id: UUID(), placeID: id, placeName: place.name,
                                  type: type, detectedAt: now, confirmedAt: nil))
         if !save(events, to: eventsURL) { events = old }
+        else if weeklyArchiveEnabled { refreshWeeklyArchives() }
     }
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         authorization = manager.authorizationStatus
