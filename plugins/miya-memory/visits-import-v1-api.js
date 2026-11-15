@@ -102,16 +102,29 @@ function register(router) {
                 const store = readStore(handle);
                 const byId = new Map(store.events.map(e => [e.event_id, e]));
                 let added = 0;
+                let updated = 0;
                 for (const item of seen.values()) {
                     const old = byId.get(item.event_id);
-                    if (old && JSON.stringify(old) !== JSON.stringify(item)) {
-                        return { conflict: true };
+                    if (old) {
+                        // Event identity and GPS detection are immutable. Users may
+                        // confirm/correct the timestamp without creating a second event.
+                        const { confirmed_at: previousConfirmation, ...previousFields } = old;
+                        const { confirmed_at: nextConfirmation, ...nextFields } = item;
+                        if (JSON.stringify(previousFields) !== JSON.stringify(nextFields)) {
+                            return { conflict: true };
+                        }
+                        if (previousConfirmation !== nextConfirmation) {
+                            byId.set(item.event_id, item);
+                            updated++;
+                        }
+                    } else {
+                        byId.set(item.event_id, item);
+                        added++;
                     }
-                    if (!old) { byId.set(item.event_id, item); added++; }
                 }
                 if (byId.size > 5000) return { limit: true };
-                if (added) writeStore(handle, { version: 1, events: [...byId.values()] });
-                return { added, duplicates: seen.size - added };
+                if (added || updated) writeStore(handle, { version: 1, events: [...byId.values()] });
+                return { added, updated, duplicates: seen.size - added - updated };
             });
             if (result.conflict) return res.status(409).json({ error: 'Conflicting event ID' });
             if (result.limit) return res.status(409).json({ error: 'Per-account event limit' });
