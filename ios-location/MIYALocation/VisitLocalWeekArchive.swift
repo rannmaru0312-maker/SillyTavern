@@ -26,6 +26,7 @@ enum VisitLocalWeekArchive {
         let hasMoreCompletedPeriods: Bool
         let lastPeriodStart: String?
         let lastFile: URL?
+        let nextPeriodStart: Date
     }
 
     enum Failure: LocalizedError {
@@ -150,7 +151,8 @@ enum VisitLocalWeekArchive {
             completedPeriodsChecked: checked,
             hasMoreCompletedPeriods: hasMore,
             lastPeriodStart: lastPeriod,
-            lastFile: lastFile
+            lastFile: lastFile,
+            nextPeriodStart: cursor
         )
     }
 }
