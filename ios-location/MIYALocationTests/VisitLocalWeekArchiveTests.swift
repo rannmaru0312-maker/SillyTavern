@@ -1,0 +1,220 @@
+import XCTest
+import CryptoKit
+@testable import MIYALocation
+
+final class VisitLocalWeekArchiveTests: XCTestCase {
+    private func utc(_ value: String) -> Date {
+        ISO8601DateFormatter().date(from: value)!
+    }
+
+    private func makeFolder() throws -> URL {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("miya-week-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
+    private func exampleEvent(confirmedAt: Date? = nil, id: UUID = UUID()) -> VisitEvent {
+        VisitEvent(id: id, placeID: UUID(), placeName: "Fictional shop",
+                   type: "entry", detectedAt: utc("2026-11-08T01:00:00Z"),
+                   confirmedAt: confirmedAt)
+    }
+
+    func testWritesAndVerifiesExactlyOneCompletedWeekWithoutDuplicating() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let anchor = utc("2026-11-07T15:00:00Z") // Nov 8, 00:00 JST
+        let now = utc("2026-11-15T01:00:00Z")
+        let event = exampleEvent()
+        let first = try VisitLocalWeekArchive.writeCompleted(
+            events: [event], anchor: anchor, now: now, directory: folder)
+        XCTAssertEqual(first.created, 1)
+        XCTAssertEqual(first.alreadyVerified, 0)
+        XCTAssertEqual(first.completedPeriodsChecked, 1)
+        let file = try XCTUnwrap(first.lastFile)
+        let saved = try Data(contentsOf: file)
+        XCTAssertFalse(saved.isEmpty)
+        let second = try VisitLocalWeekArchive.writeCompleted(
+            events: [event], anchor: anchor, now: now, directory: folder)
+        XCTAssertEqual(second.created, 0)
+        XCTAssertEqual(second.alreadyVerified, 1)
+        XCTAssertEqual(try Data(contentsOf: file), saved)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path).count, 1)
+    }
+
+    func testTimeCorrectionRetainsPriorSnapshotAsSeparateRevision() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let anchor = utc("2026-11-07T15:00:00Z")
+        let now = utc("2026-11-15T01:00:00Z")
+        let old = exampleEvent()
+        let oldReceipt = try VisitLocalWeekArchive.writeCompleted(
+            events: [old], anchor: anchor, now: now, directory: folder)
+        let oldFile = try XCTUnwrap(oldReceipt.lastFile)
+        var revised = old
+        revised.confirmedAt = utc("2026-11-08T01:05:00Z")
+        let correction = try VisitLocalWeekArchive.writeCompleted(
+            events: [revised], anchor: anchor, now: now, directory: folder)
+        XCTAssertEqual(correction.created, 1)
+        XCTAssertNotEqual(correction.lastFile, oldFile)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: oldFile.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path).count, 2)
+    }
+
+    func testTamperedExistingSnapshotFailsClosedWithoutOverwriting() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let anchor = utc("2026-11-07T15:00:00Z")
+        let now = utc("2026-11-15T01:00:00Z")
+        let visits = [exampleEvent()]
+        let original = try VisitLocalWeekArchive.writeCompleted(
+            events: visits, anchor: anchor, now: now, directory: folder)
+        let file = try XCTUnwrap(original.lastFile)
+        let changed = Data("damaged content".utf8)
+        try changed.write(to: file)
+        XCTAssertThrowsError(try VisitLocalWeekArchive.writeCompleted(
+            events: visits, anchor: anchor, now: now, directory: folder))
+        XCTAssertEqual(try Data(contentsOf: file), changed)
+    }
+
+    func testAnEmptyWeekDoesNotClaimCompleteGPSCoverage() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let result = try VisitLocalWeekArchive.writeCompleted(
+            events: [], anchor: utc("2026-11-07T15:00:00Z"),
+            now: utc("2026-11-15T01:00:00Z"), directory: folder)
+        let bytes = try Data(contentsOf: XCTUnwrap(result.lastFile))
+        let payload = try JSONDecoder().decode(VisitLocalWeekArchive.Envelope.self, from: bytes)
+        XCTAssertFalse(payload.payload.coverageVerified)
+        XCTAssertTrue(payload.payload.events.isEmpty)
+        XCTAssertEqual(payload.payload.periodStart, "2026-11-08")
+        XCTAssertEqual(payload.payload.periodEndInclusive, "2026-11-14")
+    }
+
+    func testTwentyFourWeekBatchCanResumeFromVerifiedCheckpoint() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let anchor = utc("2026-01-01T15:00:00Z") // Jan 2 in Japan
+        let now = utc("2026-02-20T15:00:00Z") // 7 completed periods
+        let first = try VisitLocalWeekArchive.writeCompleted(
+            events: [], anchor: anchor, now: now, directory: folder, maxPeriods: 2)
+        XCTAssertEqual(first.created, 2)
+        XCTAssertTrue(first.hasMoreCompletedPeriods)
+        let second = try VisitLocalWeekArchive.writeCompleted(
+            events: [], anchor: first.nextPeriodStart, now: now,
+            directory: folder, maxPeriods: 2)
+        XCTAssertEqual(second.created, 2)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path).count, 4)
+        // Repeating a completed batch must read and verify, not create duplicates.
+        let repeated = try VisitLocalWeekArchive.writeCompleted(
+            events: [], anchor: anchor, now: now, directory: folder, maxPeriods: 2)
+        XCTAssertEqual(repeated.created, 0)
+        XCTAssertEqual(repeated.alreadyVerified, 2)
+    }
+
+    func testAllSavedWeeksAreReverifiedBeforeTrustingCheckpoint() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let anchor = utc("2026-11-07T15:00:00Z")
+        let now = utc("2026-11-15T01:00:00Z")
+        let result = try VisitLocalWeekArchive.writeCompleted(
+            events: [exampleEvent()], anchor: anchor, now: now, directory: folder)
+        XCTAssertNoThrow(try VisitLocalWeekArchive.verifyCheckpoint(
+            anchor: anchor, cursor: result.nextPeriodStart, directory: folder))
+        let file = try XCTUnwrap(result.lastFile)
+        try Data("corrupt data".utf8).write(to: file)
+        XCTAssertThrowsError(try VisitLocalWeekArchive.verifyCheckpoint(
+            anchor: anchor, cursor: result.nextPeriodStart, directory: folder))
+    }
+
+    func testMissingPreviouslySavedWeekStopsResumeInsteadOfSkippingIt() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let anchor = utc("2026-11-07T15:00:00Z")
+        let now = utc("2026-11-15T01:00:00Z")
+        let result = try VisitLocalWeekArchive.writeCompleted(
+            events: [exampleEvent()], anchor: anchor, now: now, directory: folder)
+        try FileManager.default.removeItem(at: XCTUnwrap(result.lastFile))
+        XCTAssertThrowsError(try VisitLocalWeekArchive.verifyCheckpoint(
+            anchor: anchor, cursor: result.nextPeriodStart, directory: folder))
+    }
+
+    func testFileNameAndJsonHashCannotBeInconsistent() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let anchor = utc("2026-11-07T15:00:00Z")
+        let now = utc("2026-11-15T01:00:00Z")
+        let receipt = try VisitLocalWeekArchive.writeCompleted(
+            events: [exampleEvent()], anchor: anchor, now: now, directory: folder)
+        let source = try XCTUnwrap(receipt.lastFile)
+        let renamed = folder.appendingPathComponent("week-2026-11-08-invalidhash.json")
+        try FileManager.default.moveItem(at: source, to: renamed)
+        XCTAssertThrowsError(try VisitLocalWeekArchive.verifyExisting(in: folder))
+    }
+
+    func testPortableCanonicalBytesMatchSHA256AndStoredPayload() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let start = utc("2026-11-07T15:00:00Z")
+        let now = utc("2026-11-15T01:00:00Z")
+        let result = try VisitLocalWeekArchive.writeCompleted(
+            events: [exampleEvent()], anchor: start, now: now, directory: folder)
+        let archiveData = try Data(contentsOf: XCTUnwrap(result.lastFile))
+        let envelope = try JSONDecoder().decode(VisitLocalWeekArchive.Envelope.self, from: archiveData)
+        let encoded = try XCTUnwrap(envelope.canonicalPayloadBase64)
+        let canonical = try XCTUnwrap(Data(base64Encoded: encoded))
+        let checksum = SHA256.hash(data: canonical).map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(checksum, envelope.sha256)
+        XCTAssertTrue(String(data: canonical, encoding: .utf8)!.contains("Fictional shop"))
+        XCTAssertNoThrow(try VisitLocalWeekArchive.verifyExisting(in: folder))
+    }
+
+    func testTamperingPortablePayloadBytesStopsFurtherBackupClaims() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let start = utc("2026-11-07T15:00:00Z")
+        let now = utc("2026-11-15T01:00:00Z")
+        let result = try VisitLocalWeekArchive.writeCompleted(
+            events: [exampleEvent()], anchor: start, now: now, directory: folder)
+        let file = try XCTUnwrap(result.lastFile)
+        let archiveData = try Data(contentsOf: file)
+        var document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: archiveData) as? [String: Any]
+        )
+        // Change the actual embedded canonical bytes, not the optional field name.
+        // Previously, removing the optional key left a valid legacy archive.
+        document["canonicalPayloadBase64"] = Data("altered archive".utf8).base64EncodedString()
+        try JSONSerialization.data(withJSONObject: document).write(to: file, options: .atomic)
+        XCTAssertThrowsError(try VisitLocalWeekArchive.verifyExisting(in: folder))
+        XCTAssertThrowsError(try VisitLocalWeekArchive.verifyCheckpoint(
+            anchor: start, cursor: result.nextPeriodStart, directory: folder))
+    }
+
+    func testLegacySnapshotWithoutCanonicalBytesRemainsReadableOnDevice() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let start = utc("2026-11-07T15:00:00Z")
+        let now = utc("2026-11-15T01:00:00Z")
+        let result = try VisitLocalWeekArchive.writeCompleted(
+            events: [exampleEvent()], anchor: start, now: now, directory: folder)
+        let file = try XCTUnwrap(result.lastFile)
+        var document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any]
+        )
+        document.removeValue(forKey: "canonicalPayloadBase64")
+        try JSONSerialization.data(withJSONObject: document).write(to: file, options: .atomic)
+        XCTAssertNoThrow(try VisitLocalWeekArchive.verifyExisting(in: folder))
+        // The cloud intake validator remains stricter and rejects this old format.
+    }
+
+    func testUnfinishedWeekIsNotArchived() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let result = try VisitLocalWeekArchive.writeCompleted(
+            events: [], anchor: utc("2026-11-14T15:00:00Z"),
+            now: utc("2026-11-15T01:00:00Z"), directory: folder)
+        XCTAssertEqual(result.created, 0)
+        XCTAssertNil(result.lastFile)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path).count, 0)
+    }
+}

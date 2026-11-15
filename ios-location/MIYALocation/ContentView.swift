@@ -1,0 +1,334 @@
+import SwiftUI
+import CoreLocation
+import UniformTypeIdentifiers
+
+struct ContentView: View {
+    @EnvironmentObject private var recorder: LocationRecorder
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var localWeekAnchor = VisitWeekExporter.mostRecentCompletedStart()
+    @StateObject private var sync = VisitSyncClient()
+    @StateObject private var folderSync = VisitArchiveFolderSync()
+    @State private var showMirrorFolderPicker = false
+    @State private var showAdvancedServerSync = false
+    @State private var serverURL = ""
+    @State private var loginHandle = ""
+    @State private var loginPassword = ""
+    @State private var placeName = ""
+    @State private var latitude = ""
+    @State private var longitude = ""
+    @State private var exportURL: URL?
+    @State private var weekStart = VisitWeekExporter.mostRecentCompletedStart()
+    @State private var weeklyExportURL: URL?
+    @State private var weeklyExportMessage = "GPSで検知した出来事だけを書き出します"
+
+    @State private var showDelete = false
+    @State private var showEraseServer = false
+    @State private var archiveURL: URL?
+    @State private var showArchivePicker = false
+    @State private var archiveStatus = "正確な座標はバックアップに含めません"
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("位置情報") {
+                    Text("許可状態: \(authorizationText)")
+                    Button("位置情報の許可を確認") { recorder.requestPermission() }
+                    Button("現在地の座標を取得") { recorder.locate() }
+                    if let p = recorder.currentLocation {
+                        Text("取得座標: \(p.latitude), \(p.longitude)").font(.caption)
+                        Button("取得した座標を入力") {
+                            latitude = String(p.latitude)
+                            longitude = String(p.longitude)
+                        }
+                    }
+                    if recorder.monitoring {
+                        Button("監視を停止", role: .destructive) { recorder.stopMonitoring() }
+                    } else {
+                        Button("登録地点の監視を開始") { recorder.startMonitoring() }
+                    }
+                }
+                Section("訪問先を登録") {
+                    TextField("場所名", text: $placeName)
+                    TextField("緯度", text: $latitude).keyboardType(.numbersAndPunctuation)
+                    TextField("経度", text: $longitude).keyboardType(.numbersAndPunctuation)
+                    Button("登録") {
+                        guard let lat = Double(latitude), let lon = Double(longitude) else {
+                            recorder.errorMessage = "緯度・経度を数字で入力してください"; return
+                        }
+                        recorder.addPlace(name: placeName, latitude: lat, longitude: lon)
+                        placeName = ""
+                    }
+                    Text("GPSは建物への入退店を保証しません。検知時刻は推定です。").font(.caption)
+                }
+                Section("登録地点") {
+                    ForEach(recorder.places) { place in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(place.name)
+                                Text("\(place.latitude), \(place.longitude)").font(.caption)
+                            }
+                            Spacer()
+                            Button("削除", role: .destructive) { recorder.deletePlace(place.id) }
+                        }
+                    }
+                }
+                Section("訪問記録") {
+                    ForEach(recorder.events.reversed()) { event in
+                        VisitEventRow(event: event) { confirmedDate in
+                            recorder.confirm(event.id, at: confirmedDate)
+                        }
+                    }
+                    if let exportURL {
+                        ShareLink("CSVを共有", item: exportURL)
+                    }
+                    Button("CSVファイルを作成") { exportURL = recorder.exportCSV() }
+                }
+                if showAdvancedServerSync {
+                    Section("開発用サーバーへの手動同期（任意）") {
+                    Text("利用者が許可した場合だけ、登録先の名前・到着/退出種別・推定/確認時刻を送信します。GPS座標や移動経路は送信しません。")
+                        .font(.caption)
+                    TextField("https://正規サーバーURL", text: $serverURL)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("ログインID", text: $loginHandle)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("パスワード（端末には保存しません）", text: $loginPassword)
+                    if sync.isSignedIn {
+                        Text("接続先: \(sync.connectedHost)").font(.caption)
+                        Button("ログアウト") {
+                            Task { await sync.signOut() }
+                        }.disabled(sync.isBusy)
+                    } else {
+                        Button("HTTPSサーバーへログイン") {
+                            let password = loginPassword
+                            loginPassword = ""
+                            Task {
+                                await sync.signIn(serverURL: serverURL,
+                                                  handle: loginHandle, password: password)
+                            }
+                        }
+                        .disabled(sync.isBusy || serverURL.isEmpty || loginHandle.isEmpty)
+                    }
+                    Toggle("訪問記録のサーバー送信を許可", isOn: $sync.consentToUpload)
+                    Button("現在の訪問記録を送信し、サーバーから読み戻して照合") {
+                        let snapshot = recorder.events
+                        Task { await sync.uploadAndVerify(events: snapshot) }
+                    }
+                    .disabled(!sync.consentToUpload || !sync.isSignedIn ||
+                              sync.isBusy || recorder.events.isEmpty)
+                    if sync.isSignedIn {
+                        Button("サーバー上の訪問記録を削除", role: .destructive) {
+                            showEraseServer = true
+                        }.disabled(sync.isBusy)
+                    }
+                    if sync.isBusy { ProgressView("確認中") }
+                    Text(sync.statusMessage).font(.caption)
+                    Text("同期は手動操作のみです。iPhoneのアプリを閉じている間の送信や、Googleドライブへの保存はまだ行いません。")
+                        .font(.caption)
+                    }
+                }
+                Section("7日分のGPS記録を書き出す") {
+                    DatePicker("対象期間の開始日（日本時間）", selection: $weekStart,
+                               in: ...VisitWeekExporter.mostRecentCompletedStart(),
+                               displayedComponents: .date)
+                    Text("選んだ日から連続する、終了済み7日間を対象にします。記録がない日を、訪問なしと断定しません。")
+                        .font(.caption)
+                    Button("7日分のCSVを作成する") {
+                        do {
+                            let result = try VisitWeekExporter.export(events: recorder.events,
+                                                                      start: weekStart)
+                            weeklyExportURL = result.file
+                            weeklyExportMessage = "対象期間のGPS記録 \(result.eventCount)件を書き出しました。Googleドライブ保存はまだ実行していません。"
+                        } catch {
+                            weeklyExportURL = nil
+                            weeklyExportMessage = error.localizedDescription
+                        }
+                    }
+                    if let weeklyExportURL {
+                        ShareLink("7日分のCSVを共有・保存", item: weeklyExportURL)
+                    }
+                    Text(weeklyExportMessage).font(.caption)
+                    Text("本人確認済みの時刻と、GPS推定・未確認の時刻を分けて書き出します。保存後の読み戻しは別途必要です。")
+                        .font(.caption)
+                }
+                Section("7日ごとの端末内自動保管") {
+                    Text("アプリの起動・復帰時や記録更新時に、終了済み7日間のバックアップを端末内に作成し、読み戻して確認します。iOSは指定日時での実行を保証しません。")
+                        .font(.caption)
+                    if recorder.weeklyArchiveEnabled {
+                        Button("終了した7日分を今すぐ照合") { recorder.refreshWeeklyArchives() }
+                        Button("端末内の週次自動保管を停止", role: .destructive) {
+                            recorder.disableWeeklyArchives()
+                        }
+                    } else {
+                        DatePicker("最初の7日間の開始日", selection: $localWeekAnchor,
+                                   in: ...Date(), displayedComponents: .date)
+                        Button("端末内の週次自動保管を有効にする") {
+                            recorder.enableWeeklyArchives(from: localWeekAnchor)
+                        }
+                    }
+                    Text(recorder.weeklyArchiveStatus).font(.caption)
+                    if let archiveURL = recorder.latestWeeklyArchiveURL {
+                        ShareLink("確認済みの最新7日分をGoogleドライブ等へ手動共有", item: archiveURL)
+                    }
+                    Text("端末内での保管成功は、Googleドライブへのアップロード成功を意味しません。")
+                        .font(.caption)
+                }
+                Section("ファイルアプリの保存先へコピー（任意）") {
+                    Text("iPhoneのファイルアプリにGoogleドライブ等が表示されていれば、本人がそのフォルダーを選べます。コピーを許可するまでは記録を送りません。")
+                        .font(.caption)
+                    Button("保存先フォルダーを選択") { showMirrorFolderPicker = true }
+                    if folderSync.hasSelectedFolder {
+                        if folderSync.isEnabled {
+                            Button("週次ファイルをコピー・照合する") {
+                                guard recorder.weeklyArchiveEnabled,
+                                      recorder.refreshWeeklyArchives() else { return }
+                                folderSync.copyIfEnabled(from: recorder.weeklyArchiveSourceURL)
+                            }
+                            .disabled(folderSync.isBusy || !recorder.weeklyArchiveEnabled)
+                            Button("外部フォルダーへのコピーを停止", role: .destructive) {
+                                folderSync.disable()
+                            }
+                        } else {
+                            Button("外部フォルダーへのコピーを有効にする") {
+                                if recorder.weeklyArchiveEnabled { folderSync.enable() }
+                            }
+                            .disabled(!recorder.weeklyArchiveEnabled)
+                        }
+                        Button("保存先の登録を解除する") {
+                            folderSync.forgetFolder()
+                        }
+                    }
+                    Text(folderSync.status).font(.caption)
+                    Text("端末内の週次保管を有効にした場合だけコピーできます。ファイルアプリ内で読み戻せても、Googleドライブのクラウド上にアップロードされた証明にはなりません。")
+                        .font(.caption)
+                }
+                Section("訪問記録のバックアップと復元（手動）") {
+                    Button("記録のJSONバックアップを作成") {
+                        archiveURL = recorder.exportEventArchive()
+                        archiveStatus = archiveURL == nil ?
+                            "バックアップを作成できませんでした" :
+                            "記録のバックアップを作成しました。必要に応じて「ファイル」へ保存してください。"
+                    }
+                    if let archiveURL {
+                        ShareLink("バックアップを共有・ファイルに保存", item: archiveURL)
+                    }
+                    Button("JSONバックアップから復元する") { showArchivePicker = true }
+                    Text(archiveStatus).font(.caption)
+                    Text("記録ID・訪問先名・日時を保存します。座標は含みません。インポートは既存の記録を削除せず、重複・衝突を確認します。")
+                        .font(.caption)
+                }
+                Section("プライバシー") {
+                    Text("記録は端末内に保存され、サーバーへ自動送信しません。").font(.caption)
+                    Toggle("開発用サーバー接続の設定を表示", isOn: $showAdvancedServerSync)
+                    Text("個人利用では開発用サーバーへの送信設定は不要です。7日ごとの端末内保存と本人選択のファイルアプリ保存を優先します。").font(.caption)
+                    Button("全地点・全記録を削除", role: .destructive) { showDelete = true }
+                }
+                if recorder.hasStorageReadError {
+                    Section("保全のため記録を停止中") {
+                        Text("既存の保存ファイルを読み込めません。データ消失を防ぐため上書きしていません。バックアップから復元するか、全記録の削除を明示的に選んでください。")
+                            .foregroundStyle(.red)
+                    }
+                }
+                if let message = recorder.errorMessage {
+                    Section("確認が必要") { Text(message).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle("みやの生活記録")
+            .onAppear {
+                if recorder.weeklyArchiveEnabled && recorder.refreshWeeklyArchives() {
+                    folderSync.copyIfEnabled(from: recorder.weeklyArchiveSourceURL)
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active,
+                   recorder.weeklyArchiveEnabled,
+                   recorder.refreshWeeklyArchives() {
+                    folderSync.copyIfEnabled(from: recorder.weeklyArchiveSourceURL)
+                }
+            }
+            .fileImporter(isPresented: $showMirrorFolderPicker,
+                          allowedContentTypes: [.folder],
+                          allowsMultipleSelection: false) { result in
+                do {
+                    if let selected = try result.get().first {
+                        folderSync.selectFolder(selected)
+                    }
+                } catch {
+                    // The caller has not authorized any upload.
+                    folderSync.disable()
+                }
+            }
+            .confirmationDialog("端末内の地点・訪問記録・週次バックアップを削除しますか？", isPresented: $showDelete) {
+                Button("端末内の全データを削除", role: .destructive) { recorder.deleteAll() }
+            } message: {
+                Text("このiPhone内の位置登録・訪問記録・自動週次バックアップが対象です。手動共有したGoogleドライブやサーバー上のデータは削除されません。")
+            }
+            .alert("サーバーの訪問記録をすべて削除しますか？", isPresented: $showEraseServer) {
+                Button("削除する", role: .destructive) {
+                    Task { await sync.eraseRemoteVisits() }
+                }
+                Button("中止", role: .cancel) {}
+            } message: {
+                Text("ログイン中の本人アカウントのサーバー記録を削除します。iPhone内の記録は残るため、後から送信すると再登録されます。")
+            }
+            .fileImporter(isPresented: $showArchivePicker,
+                          allowedContentTypes: [.json],
+                          allowsMultipleSelection: false) { result in
+                do {
+                    guard let url = try result.get().first else {
+                        archiveStatus = "ファイルが選択されませんでした"
+                        return
+                    }
+                    if recorder.restoreEventArchive(from: url) {
+                        archiveStatus = "復元が完了しました。記録IDを照合して、既存の訪問を重複させず統合しました。"
+                    } else {
+                        archiveStatus = "復元できませんでした。エラー表示を確認してください。"
+                    }
+                } catch {
+                    archiveStatus = "ファイルを読み込めませんでした: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+    private var authorizationText: String {
+        switch recorder.authorization {
+        case .authorizedAlways: return "常に許可"
+        case .authorizedWhenInUse: return "使用中のみ"
+        case .denied: return "拒否"
+        case .restricted: return "制限あり"
+        default: return "未確認"
+        }
+    }
+}
+
+
+private struct VisitEventRow: View {
+    let event: VisitEvent
+    let onConfirm: (Date) -> Void
+    @State private var proposedTime: Date
+
+    init(event: VisitEvent, onConfirm: @escaping (Date) -> Void) {
+        self.event = event
+        self.onConfirm = onConfirm
+        _proposedTime = State(initialValue: event.confirmedAt ?? event.detectedAt)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("\(event.placeName) / \(event.type == "entry" ? "到着の推定" : "退出の推定")")
+                .font(.headline)
+            Text("GPS検知（推定）：\(event.detectedAt.formatted(date: .abbreviated, time: .shortened))")
+                .font(.caption)
+            if let confirmed = event.confirmedAt {
+                Text("本人確認：\(confirmed.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption)
+            } else {
+                Text("本人未確認").font(.caption)
+            }
+            DatePicker("実際の日時に修正", selection: $proposedTime,
+                       displayedComponents: [.date, .hourAndMinute])
+            Button("この日時で確定・保存") { onConfirm(proposedTime) }
+        }
+    }
+}
