@@ -165,8 +165,25 @@ struct VisitEvent: Codable, Identifiable {
         let oldEvents = events
         places = []
         events = []
-        if !save(places, to: placesURL, allowExplicitRecovery: true) { places = oldPlaces }
-        if !save(events, to: eventsURL, allowExplicitRecovery: true) { events = oldEvents }
+        let clearedPlaces = save(places, to: placesURL, allowExplicitRecovery: true)
+        let clearedEvents = save(events, to: eventsURL, allowExplicitRecovery: true)
+        if !clearedPlaces { places = oldPlaces }
+        if !clearedEvents { events = oldEvents }
+        guard clearedPlaces && clearedEvents else {
+            errorMessage = "一部の記録を削除できませんでした。残存データを確認してください。"
+            return
+        }
+        disableWeeklyArchives()
+        UserDefaults.standard.removeObject(forKey: weeklyStartKey)
+        UserDefaults.standard.removeObject(forKey: weeklyCursorKey)
+        latestWeeklyArchiveURL = nil
+        if FileManager.default.fileExists(atPath: weeklyArchivesURL.path) {
+            do {
+                try FileManager.default.removeItem(at: weeklyArchivesURL)
+            } catch {
+                errorMessage = "記録は削除しましたが、週次バックアップの削除に失敗しました：\(error.localizedDescription)"
+            }
+        }
     }
     /// Archives completed seven-day periods locally when the app becomes active,
     /// or after a new event / time confirmation. The OS does not guarantee
