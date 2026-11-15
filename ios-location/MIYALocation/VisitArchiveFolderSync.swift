@@ -12,6 +12,8 @@ import Combine
 
     private let bookmarkKey = "miya-files-provider-weekly-bookmark-v1"
     private let enabledKey = "miya-files-provider-weekly-enabled-v1"
+    private var activeCopy: Task<Result<VisitArchiveFileMirror.Receipt, Error>, Never>?
+    private var requestGeneration = 0
 
     init() {
         let defaults = UserDefaults.standard
@@ -39,10 +41,9 @@ import Combine
                 status = "フォルダーへのアクセスを保存できませんでした"
                 return
             }
+            disable()
             UserDefaults.standard.set(bookmark, forKey: bookmarkKey)
             hasSelectedFolder = true
-            isEnabled = false
-            UserDefaults.standard.set(false, forKey: enabledKey)
             status = "保存先を登録しました。コピーを有効にするまでは送信しません"
         } catch {
             status = "フォルダーの登録に失敗しました。ファイルアプリから選び直してください"
@@ -60,6 +61,12 @@ import Combine
     }
 
     func disable() {
+        // Stop pending work at the next file boundary and suppress stale UI
+        // success if a networked File Provider finishes after consent revocation.
+        requestGeneration += 1
+        activeCopy?.cancel()
+        activeCopy = nil
+        isBusy = false
         isEnabled = false
         UserDefaults.standard.set(false, forKey: enabledKey)
         status = "外部フォルダーへの自動コピーを停止しました。既存のコピーは残ります"
@@ -72,8 +79,8 @@ import Combine
         status = "保存先へのアクセス設定を破棄しました（保存済みファイルは削除しません）"
     }
 
-    /// App-open/resume best effort only. No unattended or exact-time guarantee.
-    /// No location coordinates, session cookies or passwords are transmitted.
+    /// App-open/resume best effort only. File Provider I/O must NOT block the
+    /// SwiftUI main actor while a networked provider is unavailable or slow.
     func copyIfEnabled(from localArchives: URL) {
         guard isEnabled, !isBusy else { return }
         guard let bookmark = UserDefaults.standard.data(forKey: bookmarkKey) else {
@@ -82,26 +89,65 @@ import Combine
             return
         }
         isBusy = true
-        defer { isBusy = false }
-        do {
-            var stale = false
-            let folder = try URL(resolvingBookmarkData: bookmark, options: [],
-                                 relativeTo: nil, bookmarkDataIsStale: &stale)
-            guard !stale, folder.isFileURL, folder.startAccessingSecurityScopedResource() else {
-                status = "保存先への権限が失われました。ファイルアプリから選び直してください"
+        requestGeneration += 1
+        let generation = requestGeneration
+
+        let operation = Task.detached(priority: .utility) {
+            () -> Result<VisitArchiveFileMirror.Receipt, Error> in
+            do {
+                try Task<Never, Never>.checkCancellation()
+                var stale = false
+                let folder = try URL(resolvingBookmarkData: bookmark, options: [],
+                                     relativeTo: nil, bookmarkDataIsStale: &stale)
+                guard !stale, folder.isFileURL,
+                      folder.startAccessingSecurityScopedResource() else {
+                    throw FolderSyncError.scopeUnavailable
+                }
+                defer { folder.stopAccessingSecurityScopedResource() }
+                let receipt = try VisitArchiveFileMirror.copyVerifiedArchives(
+                    from: localArchives, to: folder,
+                    shouldCancel: { Task<Never, Never>.isCancelled }
+                )
+                try Task<Never, Never>.checkCancellation()
+                return .success(receipt)
+            } catch {
+                return .failure(error)
+            }
+        }
+        activeCopy = operation
+        Task { @MainActor [weak self] in
+            let result = await operation.value
+            guard let self, self.requestGeneration == generation else {
+                // The user disabled sharing or selected a different folder.
+                // No stale result is allowed to announce copy success.
                 return
             }
-            defer { folder.stopAccessingSecurityScopedResource() }
-            let receipt = try VisitArchiveFileMirror.copyVerifiedArchives(
-                from: localArchives, to: folder
-            )
-            let suffix = receipt.moreFilesRemain ? "残りのファイルがあります。再試行が必要です。" : ""
-            status = "ファイルアプリ経由：新規" + String(receipt.copied) +
-                "件、コピー照合済み" + String(receipt.existingVerified) + "件。" +
-                suffix + " Driveクラウド上の保存確認はまだ完了していません。"
-        } catch {
-            status = "外部フォルダーへのコピー・読み戻し照合に失敗しました：" +
-                error.localizedDescription
+            self.activeCopy = nil
+            self.isBusy = false
+            guard self.isEnabled else { return }
+            switch result {
+            case .success(let receipt):
+                let remaining = receipt.moreFilesRemain ?
+                    "残りのファイルがあります。再試行が必要です。" : ""
+                self.status = "ファイルアプリ経由：新規" + String(receipt.copied) +
+                    "件、コピー照合済み" + String(receipt.existingVerified) + "件。" +
+                    remaining + " Driveクラウド上の保存確認はまだ完了していません。"
+            case .failure(let error):
+                if error is CancellationError {
+                    self.status = "コピーは途中で停止しました。再開時に未完了分を検証します"
+                } else {
+                    self.status = "外部フォルダーへのコピー・読み戻し照合に失敗しました：" +
+                        error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private enum FolderSyncError: LocalizedError {
+        case scopeUnavailable
+
+        var errorDescription: String? {
+            "保存先への権限が失われました。ファイルアプリから選び直してください"
         }
     }
 }
