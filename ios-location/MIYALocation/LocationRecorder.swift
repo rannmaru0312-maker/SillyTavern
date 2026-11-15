@@ -38,7 +38,7 @@ struct VisitEvent: Codable, Identifiable {
         places = load([VisitPlace].self, from: placesURL) ?? []
         events = load([VisitEvent].self, from: eventsURL) ?? []
         monitoring = UserDefaults.standard.bool(forKey: intentKey)
-        if !monitoring { stopRegions() }
+        if !monitoring { stopRegions() } else if authorization == .authorizedAlways { startMonitoring() }
     }
     private func load<T: Decodable>(_ type: T.Type, from url: URL) -> T? {
         guard let data = try? Data(contentsOf: url) else { return nil }
@@ -78,8 +78,10 @@ struct VisitEvent: Codable, Identifiable {
         if monitoring { startMonitoring() }
     }
     func deletePlace(_ id: UUID) {
+        let old = places
         places.removeAll { $0.id == id }
-        if save(places, to: placesURL), monitoring { startMonitoring() }
+        guard save(places, to: placesURL) else { places = old; return }
+        if monitoring { startMonitoring() }
     }
     func startMonitoring() {
         guard manager.authorizationStatus == .authorizedAlways else {
@@ -111,15 +113,18 @@ struct VisitEvent: Codable, Identifiable {
     }
     func confirm(_ id: UUID, at date: Date) {
         guard let i = events.firstIndex(where: { $0.id == id }) else { return }
+        let old = events
         events[i].confirmedAt = date
-        save(events, to: eventsURL)
+        if !save(events, to: eventsURL) { events = old }
     }
     func deleteAll() {
         stopMonitoring()
+        let oldPlaces = places
+        let oldEvents = events
         places = []
         events = []
-        save(places, to: placesURL)
-        save(events, to: eventsURL)
+        if !save(places, to: placesURL) { places = oldPlaces }
+        if !save(events, to: eventsURL) { events = oldEvents }
     }
     func exportCSV() -> URL? {
         func quote(_ s: String) -> String { "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
@@ -148,6 +153,7 @@ struct VisitEvent: Codable, Identifiable {
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         authorization = manager.authorizationStatus
         if authorization != .authorizedAlways && monitoring { stopMonitoring() }
+        else if authorization == .authorizedAlways && monitoring { startMonitoring() }
     }
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         currentLocation = locations.last?.coordinate
