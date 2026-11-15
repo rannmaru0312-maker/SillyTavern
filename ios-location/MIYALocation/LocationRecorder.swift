@@ -23,6 +23,8 @@ struct VisitEvent: Codable, Identifiable {
     @Published private(set) var authorization: CLAuthorizationStatus = .notDetermined
     @Published private(set) var monitoring = false
     @Published var errorMessage: String?
+    @Published private(set) var hasStorageReadError = false
+    private var unreadableFiles = Set<String>()
     @Published private(set) var weeklyArchiveEnabled = UserDefaults.standard.bool(forKey: "miya-weekly-local-archive-enabled")
     @Published private(set) var weeklyArchiveStatus = "7日ごとの端末内保管は未設定です。Googleドライブへの自動保存ではありません。"
     @Published private(set) var latestWeeklyArchiveURL: URL?
@@ -48,16 +50,35 @@ struct VisitEvent: Codable, Identifiable {
         if weeklyArchiveEnabled { refreshWeeklyArchives() }
     }
     private func load<T: Decodable>(_ type: T.Type, from url: URL) -> T? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(type, from: data)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        do {
+            return try JSONDecoder().decode(type, from: Data(contentsOf: url))
+        } catch {
+            // Never treat an unreadable existing file as an empty new diary.
+            // Doing so could overwrite years of legitimate visit events.
+            unreadableFiles.insert(url.lastPathComponent)
+            hasStorageReadError = true
+            errorMessage = "以前の訪問記録を読み込めませんでした。元ファイルを上書きせず保全しています。"
+            return nil
+        }
     }
-    @discardableResult private func save<T: Encodable>(_ value: T, to url: URL) -> Bool {
+    @discardableResult private func save<T: Encodable>(
+        _ value: T, to url: URL, allowExplicitRecovery: Bool = false
+    ) -> Bool {
+        guard allowExplicitRecovery || !unreadableFiles.contains(url.lastPathComponent) else {
+            errorMessage = "読み込めない既存ファイルの上書きを停止しました。復元または明示削除が必要です。"
+            return false
+        }
         do {
             try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
             // Region events may arrive with the device locked. Files remain
             // protected until the first unlock after each reboot.
             try JSONEncoder().encode(value).write(
                 to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            if allowExplicitRecovery {
+                unreadableFiles.remove(url.lastPathComponent)
+                hasStorageReadError = !unreadableFiles.isEmpty
+            }
             return true
         } catch { errorMessage = "保存失敗: \(error.localizedDescription)"; return false }
     }
@@ -94,6 +115,10 @@ struct VisitEvent: Codable, Identifiable {
         if monitoring { startMonitoring() }
     }
     func startMonitoring() {
+        guard !hasStorageReadError else {
+            errorMessage = "既存データの読込エラーを解消するまで位置監視を開始できません"
+            return
+        }
         guard manager.authorizationStatus == .authorizedAlways else {
             errorMessage = "バックグラウンド検知には位置情報の『常に許可』が必要です"; return
         }
@@ -134,8 +159,8 @@ struct VisitEvent: Codable, Identifiable {
         let oldEvents = events
         places = []
         events = []
-        if !save(places, to: placesURL) { places = oldPlaces }
-        if !save(events, to: eventsURL) { events = oldEvents }
+        if !save(places, to: placesURL, allowExplicitRecovery: true) { places = oldPlaces }
+        if !save(events, to: eventsURL, allowExplicitRecovery: true) { events = oldEvents }
     }
     /// Archives completed seven-day periods locally when the app becomes active,
     /// or after a new event / time confirmation. The OS does not guarantee
@@ -164,6 +189,10 @@ struct VisitEvent: Codable, Identifiable {
 
     func refreshWeeklyArchives(now: Date = Date()) {
         guard weeklyArchiveEnabled else { return }
+        guard !unreadableFiles.contains(eventsURL.lastPathComponent) else {
+            weeklyArchiveStatus = "記録ファイルを読み込めないため、空の週として保存することを防止しました"
+            return
+        }
         let timestamp = UserDefaults.standard.double(forKey: weeklyStartKey)
         guard timestamp >= 946_684_800 else {
             weeklyArchiveStatus = "週次保管の開始日を設定し直してください"
@@ -207,7 +236,7 @@ struct VisitEvent: Codable, Identifiable {
             let merged = try VisitArchive.merge(current: events, archive: bytes)
             let old = events
             events = merged
-            if !save(events, to: eventsURL) {
+            if !save(events, to: eventsURL, allowExplicitRecovery: true) {
                 events = old
                 return false
             }
