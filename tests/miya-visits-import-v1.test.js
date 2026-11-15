@@ -104,6 +104,9 @@ describe('MIYA opt-in visit import', () => {
         expect(repeated.body).toMatchObject({ added: 0, updated: 0, duplicates: 1 });
         const corrected = { ...EVENT, confirmed_at: '2026-11-15T01:03:00Z' };
         expect(send(router, { ...owner, body: { events: [corrected] } }).body.updated).toBe(1);
+        // A delayed retry from a device with no confirmed timestamp
+        // must never clear the later user-confirmed value.
+        expect(send(router, { ...owner, body: { events: [EVENT] } }).statusCode).toBe(409);
         expect(get(router, owner).body.events).toEqual([corrected]);
         const otherAccount = get(router, user('bob'));
         expect(otherAccount.body.events).toEqual([]);
