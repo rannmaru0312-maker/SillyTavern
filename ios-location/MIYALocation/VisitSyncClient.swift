@@ -23,6 +23,7 @@ private struct MeReply: Decodable { let handle: String }
 private struct ImportReply: Decodable {
     let success: Bool
     let added: Int
+    let updated: Int
     let duplicates: Int
 }
 private struct DeleteReply: Decodable {
@@ -187,7 +188,7 @@ private struct RemoteVisitEvent: Codable, Equatable {
                 let answer = try await request(base: base, endpoint: "api/plugins/miya-memory/visits/import-v1",
                                                method: "POST", body: bytes, token: csrfToken)
                 let receipt = try JSONDecoder().decode(ImportReply.self, from: answer)
-                guard receipt.success, receipt.added + receipt.duplicates == end - start else {
+                guard receipt.success, receipt.added + receipt.updated + receipt.duplicates == end - start else {
                     throw APIError(message: "サーバーが受信件数を確認できませんでした")
                 }
                 checked = end
