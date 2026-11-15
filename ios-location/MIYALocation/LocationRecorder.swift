@@ -154,9 +154,9 @@ struct VisitEvent: Codable, Identifiable {
         events[i].confirmedAt = date
         if !save(events, to: eventsURL) { events = old }
         else if weeklyArchiveEnabled {
-            refreshCompletedWeek(containing: previousTime)
-            refreshCompletedWeek(containing: date)
-            refreshWeeklyArchives()
+            let previousOK = refreshCompletedWeek(containing: previousTime)
+            let currentOK = refreshCompletedWeek(containing: date)
+            if previousOK && currentOK { refreshWeeklyArchives() }
         }
     }
     func deleteAll() {
@@ -241,25 +241,31 @@ struct VisitEvent: Codable, Identifiable {
         }
     }
 
-    /// Refresh historical weeks after a user correction. Prior snapshots stay
-    /// on disk as immutable revisions, so editing a past date is never destructive.
-    private func refreshCompletedWeek(containing timestamp: Date) {
-        guard weeklyArchiveEnabled, !unreadableFiles.contains(eventsURL.lastPathComponent),
-              let calendar = VisitWeekExporter.japanCalendar() else { return }
+    private func weekStart(containing date: Date) -> Date? {
+        guard let calendar = VisitWeekExporter.japanCalendar() else { return nil }
         let anchorEpoch = UserDefaults.standard.double(forKey: weeklyStartKey)
-        guard anchorEpoch >= 946_684_800 else { return }
+        guard anchorEpoch >= 946_684_800 else { return nil }
         let anchorDay = calendar.startOfDay(for: Date(timeIntervalSince1970: anchorEpoch))
-        let eventDay = calendar.startOfDay(for: timestamp)
-        let days = calendar.dateComponents([.day], from: anchorDay, to: eventDay).day ?? -1
-        guard days >= 0,
-              let weekStart = calendar.date(byAdding: .day, value: (days / 7) * 7, to: anchorDay) else { return }
+        let day = calendar.startOfDay(for: date)
+        let days = calendar.dateComponents([.day], from: anchorDay, to: day).day ?? -1
+        guard days >= 0 else { return nil }
+        return calendar.date(byAdding: .day, value: (days / 7) * 7, to: anchorDay)
+    }
+
+    /// Refresh historical weeks after a user correction or restoring a backup.
+    /// Immutable prior revisions are preserved; failures remain visible to user.
+    @discardableResult private func refreshCompletedWeek(containing timestamp: Date) -> Bool {
+        guard weeklyArchiveEnabled, !unreadableFiles.contains(eventsURL.lastPathComponent),
+              let start = weekStart(containing: timestamp) else { return true }
         do {
             let report = try VisitLocalWeekArchive.writeCompleted(
-                events: events, anchor: weekStart, directory: weeklyArchivesURL, maxPeriods: 1
+                events: events, anchor: start, directory: weeklyArchivesURL, maxPeriods: 1
             )
             if let file = report.lastFile { latestWeeklyArchiveURL = file }
+            return true
         } catch {
             weeklyArchiveStatus = "過去の週のバックアップ照合に失敗しました：\(error.localizedDescription)"
+            return false
         }
     }
 
@@ -289,6 +295,26 @@ struct VisitEvent: Codable, Identifiable {
             if !save(events, to: eventsURL, allowExplicitRecovery: true) {
                 events = old
                 return false
+            }
+            if weeklyArchiveEnabled {
+                let oldByID = Dictionary(uniqueKeysWithValues: old.map { ($0.id, $0) })
+                var weeksToRefresh = Set<Date>()
+                for event in events {
+                    let previous = oldByID[event.id]
+                    if previous == nil || previous?.confirmedAt != event.confirmedAt {
+                        if let date = weekStart(containing: event.confirmedAt ?? event.detectedAt) {
+                            weeksToRefresh.insert(date)
+                        }
+                        if let previous,
+                           let oldWeek = weekStart(containing: previous.confirmedAt ?? previous.detectedAt) {
+                            weeksToRefresh.insert(oldWeek)
+                        }
+                    }
+                }
+                for start in weeksToRefresh.sorted() {
+                    guard refreshCompletedWeek(containing: start) else { return false }
+                }
+                refreshWeeklyArchives()
             }
             return true
         } catch {
