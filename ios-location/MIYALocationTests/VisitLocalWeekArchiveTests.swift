@@ -177,14 +177,34 @@ final class VisitLocalWeekArchiveTests: XCTestCase {
         let result = try VisitLocalWeekArchive.writeCompleted(
             events: [exampleEvent()], anchor: start, now: now, directory: folder)
         let file = try XCTUnwrap(result.lastFile)
-        let archive = try String(contentsOf: file, encoding: .utf8)
-        // Existing SHA-256 is untouched; changing embedded bytes must fail.
-        let edited = archive.replacingOccurrences(of: "canonicalPayloadBase64",
-                                                    with: "differentPayloadField")
-        try edited.write(to: file, atomically: true, encoding: .utf8)
+        let archiveData = try Data(contentsOf: file)
+        var document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: archiveData) as? [String: Any]
+        )
+        // Change the actual embedded canonical bytes, not the optional field name.
+        // Previously, removing the optional key left a valid legacy archive.
+        document["canonicalPayloadBase64"] = Data("altered archive".utf8).base64EncodedString()
+        try JSONSerialization.data(withJSONObject: document).write(to: file, options: .atomic)
         XCTAssertThrowsError(try VisitLocalWeekArchive.verifyExisting(in: folder))
         XCTAssertThrowsError(try VisitLocalWeekArchive.verifyCheckpoint(
             anchor: start, cursor: result.nextPeriodStart, directory: folder))
+    }
+
+    func testLegacySnapshotWithoutCanonicalBytesRemainsReadableOnDevice() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let start = utc("2026-11-07T15:00:00Z")
+        let now = utc("2026-11-15T01:00:00Z")
+        let result = try VisitLocalWeekArchive.writeCompleted(
+            events: [exampleEvent()], anchor: start, now: now, directory: folder)
+        let file = try XCTUnwrap(result.lastFile)
+        var document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any]
+        )
+        document.removeValue(forKey: "canonicalPayloadBase64")
+        try JSONSerialization.data(withJSONObject: document).write(to: file, options: .atomic)
+        XCTAssertNoThrow(try VisitLocalWeekArchive.verifyExisting(in: folder))
+        // The cloud intake validator remains stricter and rejects this old format.
     }
 
     func testUnfinishedWeekIsNotArchived() throws {
