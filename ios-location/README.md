@@ -1,25 +1,33 @@
-# MIYA Location — iOS geofence prototype (Draft PR #29)
+# MIYA Location — iPhone geofence & manual sync prototype (Draft PR #29)
 
-## Implemented in this branch
-- SwiftUI app with place registration (manual coordinates or current location), local JSON persistence, event list and explicit CSV export
-- CoreLocation circular region monitoring with Always permission requirement, stop/delete controls, event deduplication, user confirmation marker
-- XcodeGen iOS project and unsigned iOS Simulator build workflow
-- No hard-coded home/work coordinates; no background uploads or external services; location remains on-device
+## Verified so far
+- iOS Simulator unsigned builds passed for earlier commits (most recent prior known success: a20180f). See PR checks for the **latest HEAD** result; a passing build is not an iPhone field test.
+- Node/Jest and ESLint checks have passed on earlier commits. The new Swift sync client and server file-lock changes must pass their own latest checks.
 
-## Not yet verified / not complete
-- GitHub Actions iOS build has **not run or passed**. Check macOS runner billing/quota before starting.
-- iPhone installation requires Apple code signing and physical-device testing; not available from Windows alone.
-- Arrival/departure notifications are approximate and may be delayed or missed; no guarantee of indoor entrance detection.
-- Google Drive seven-day export and authenticated MIYA & KOHARU backend import **not implemented**. CSV export requires user action.
-- No end-to-end tests, background permission tests, or iOS device tests have passed.
-- Existing app, production systems, auth, and memory are untouched. Keep this PR Draft until verified.
+## Features in source code
+- SwiftUI interface to register a location by explicit coordinates or current location, start/stop monitoring, and inspect geofence entry/exit events.
+- Local event storage, user confirmation marker, CSV export, and device-side deletion.
+- Optional **manual** upload: enter the correct MIYA server HTTPS URL and existing account username/password, sign in using SillyTavern's login and CSRF middleware, explicitly grant upload consent, and press the send button.
+- The client verifies GET /api/users/me before accepting the session and does not persist the password, cookies or credentials to disk. It blocks HTTP redirects, prohibits plaintext HTTP and does not embed service credentials.
+- Sends user-named place + timestamps + event IDs, **never exact coordinates or location tracks**. After POST batches (20 max), GET export and compare every uploaded record before saying server sync succeeded.
+- Prototype import API is **disabled by default**, with session-based user separation, file-level locking to prevent concurrent lost updates, event ID deduplication and JSON export. To enable it in a **dedicated test environment only**, set MIYA_VISIT_IMPORT_ENABLED=1 and MIYA_VISIT_DATA_DIR to a private absolute directory; server plugins must already be enabled and restarted. Do not switch these on in production without tests.
 
-## Before production
-1. Run XcodeGen + Xcode build on macOS (only with confirmed free CI quota).
-2. Fix compile failures; test foreground/background location permission and revocation.
-3. Add deterministic tests for duplicate events, region-limit, data persistence, and privacy.
-4. Implement opt-in authenticated import with user isolation, event idempotency, and audit trail.
-5. Integrate verified weekly Google Drive write/readback, error retry, and success-only notification.
-6. Test on real iPhone with the owner's consent; review battery and privacy settings.
+## Significant limitations
+- Upload happens only while app is open and the user presses the button. **No background upload**, automatic account login or unattended seven-day Google Drive sync has been implemented.
+- Server stores events in private local JSON files, which may be **ephemeral on cloud hosts**, not durable across deployment or scalable to multiple hosts. There is no production database, retention / delete API, audit trail, or complete rate limiting.
+- Login uses the existing session/cookie authentication; only tested as isolated code so far. A full real HTTP integration test with the actual server is still required.
+- A confirmed_at change after an earlier upload causes a 409 conflict by design (events are immutable); an authenticated event correction protocol is needed.
+- A geofence callback is not evidence of an actual building entrance. The estimated time must remain visibly distinct from user-confirmed time.
+- iPhone installation/signing and background location behavior are **not tested**. A Mac/Xcode or a compatible signed build and Apple's authorization requirements are needed before actual device use.
+- iOS source has not been merged into MIYA & KOHARU production. Keep the PR Draft until review.
+- Never put real home/work coordinates, passwords or live user data into GitHub or CI.
 
-No credentials, real addresses, or private diary contents should enter this repository.
+## Next steps
+1. Verify latest iOS build, Jest, ESLint on the exact PR HEAD; fix compile or test issues.
+2. Test real HTTP login / CSRF / cookie lifecycle, denied access and logout with isolated accounts.
+3. Design persistent authenticated storage, rate limiting, conflict-safe edits and delete/export.
+4. Test on a signed iPhone, foreground/background/restart, permission revocation and battery impact.
+5. Add opt-in unattended upload only after secure persistent device credentials and privacy review.
+6. Link server events to seven-day Drive export with verification and success-only notifications.
+
+This is a development prototype, **not a ready-to-install iPhone app**.
