@@ -44,6 +44,10 @@ async function init(router) {
 
     require("./add-decision-v3-api.js")(router);
     require("./add-candidate-v3-api.js")(router);
+    // Opt-in only: session-bound visit import; never expose in default configuration.
+    if (process.env.MIYA_VISIT_IMPORT_ENABLED === '1') {
+        require("./visits-import-v1-api.js").register(router);
+    }
     // V3: ログイン利用者専用の記憶候補・判定結果読み出しAPI
     router.get('/decisions-v3', (req, res) => {
         const userId = req.user?.profile?.handle;
