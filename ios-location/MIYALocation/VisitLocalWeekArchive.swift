@@ -25,6 +25,7 @@ enum VisitLocalWeekArchive {
         let completedPeriodsChecked: Int
         let hasMoreCompletedPeriods: Bool
         let lastPeriodStart: String?
+        let lastFile: URL?
     }
 
     enum Failure: LocalizedError {
@@ -87,6 +88,7 @@ enum VisitLocalWeekArchive {
         var alreadyVerified = 0
         var checked = 0
         var lastPeriod: String?
+        var lastFile: URL?
         let encoder = encoder()
 
         while checked < maxPeriods {
@@ -137,6 +139,7 @@ enum VisitLocalWeekArchive {
             }
             checked += 1
             lastPeriod = periodStart
+            lastFile = file
             cursor = end
         }
 
@@ -146,7 +149,8 @@ enum VisitLocalWeekArchive {
             alreadyVerified: alreadyVerified,
             completedPeriodsChecked: checked,
             hasMoreCompletedPeriods: hasMore,
-            lastPeriodStart: lastPeriod
+            lastPeriodStart: lastPeriod,
+            lastFile: lastFile
         )
     }
 }
