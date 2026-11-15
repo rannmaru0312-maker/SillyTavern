@@ -60,13 +60,8 @@ struct ContentView: View {
                 }
                 Section("訪問記録") {
                     ForEach(recorder.events.reversed()) { event in
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("\(event.placeName) / \(event.type == "entry" ? "到着推定" : "退出推定")")
-                            Text(event.detectedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption)
-                            if let date = event.confirmedAt {
-                                Text("確認済み: \(date.formatted(date: .abbreviated, time: .shortened))").font(.caption)
-                            }
-                            Button("検知時刻を確認済みにする") { recorder.confirm(event.id, at: event.detectedAt) }
+                        VisitEventRow(event: event) { confirmedDate in
+                            recorder.confirm(event.id, at: confirmedDate)
                         }
                     }
                     if let exportURL {
@@ -147,6 +142,37 @@ struct ContentView: View {
         case .denied: return "拒否"
         case .restricted: return "制限あり"
         default: return "未確認"
+        }
+    }
+}
+
+
+private struct VisitEventRow: View {
+    let event: VisitEvent
+    let onConfirm: (Date) -> Void
+    @State private var proposedTime: Date
+
+    init(event: VisitEvent, onConfirm: @escaping (Date) -> Void) {
+        self.event = event
+        self.onConfirm = onConfirm
+        _proposedTime = State(initialValue: event.confirmedAt ?? event.detectedAt)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("\(event.placeName) / \(event.type == "entry" ? "到着の推定" : "退出の推定")")
+                .font(.headline)
+            Text("GPS検知（推定）：\(event.detectedAt.formatted(date: .abbreviated, time: .shortened))")
+                .font(.caption)
+            if let confirmed = event.confirmedAt {
+                Text("本人確認：\(confirmed.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption)
+            } else {
+                Text("本人未確認").font(.caption)
+            }
+            DatePicker("実際の日時に修正", selection: $proposedTime,
+                       displayedComponents: [.date, .hourAndMinute])
+            Button("この日時で確定・保存") { onConfirm(proposedTime) }
         }
     }
 }
