@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreLocation
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var recorder: LocationRecorder
@@ -17,6 +18,9 @@ struct ContentView: View {
 
     @State private var showDelete = false
     @State private var showEraseServer = false
+    @State private var archiveURL: URL?
+    @State private var showArchivePicker = false
+    @State private var archiveStatus = "正確な座標はバックアップに含めません"
     var body: some View {
         NavigationStack {
             Form {
@@ -141,6 +145,21 @@ struct ContentView: View {
                     Text("本人確認済みの時刻と、GPS推定・未確認の時刻を分けて書き出します。保存後の読み戻しは別途必要です。")
                         .font(.caption)
                 }
+                Section("訪問記録のバックアップと復元（手動）") {
+                    Button("記録のJSONバックアップを作成") {
+                        archiveURL = recorder.exportEventArchive()
+                        archiveStatus = archiveURL == nil ?
+                            "バックアップを作成できませんでした" :
+                            "記録のバックアップを作成しました。必要に応じて「ファイル」へ保存してください。"
+                    }
+                    if let archiveURL {
+                        ShareLink("バックアップを共有・ファイルに保存", item: archiveURL)
+                    }
+                    Button("JSONバックアップから復元する") { showArchivePicker = true }
+                    Text(archiveStatus).font(.caption)
+                    Text("記録ID・訪問先名・日時を保存します。座標は含みません。インポートは既存の記録を削除せず、重複・衝突を確認します。")
+                        .font(.caption)
+                }
                 Section("プライバシー") {
                     Text("記録は端末内に保存され、サーバーへ自動送信しません。").font(.caption)
                     Button("全地点・全記録を削除", role: .destructive) { showDelete = true }
@@ -160,6 +179,23 @@ struct ContentView: View {
                 Button("中止", role: .cancel) {}
             } message: {
                 Text("ログイン中の本人アカウントのサーバー記録を削除します。iPhone内の記録は残るため、後から送信すると再登録されます。")
+            }
+            .fileImporter(isPresented: $showArchivePicker,
+                          allowedContentTypes: [.json],
+                          allowsMultipleSelection: false) { result in
+                do {
+                    guard let url = try result.get().first else {
+                        archiveStatus = "ファイルが選択されませんでした"
+                        return
+                    }
+                    if recorder.restoreEventArchive(from: url) {
+                        archiveStatus = "復元が完了しました。記録IDを照合して、既存の訪問を重複させず統合しました。"
+                    } else {
+                        archiveStatus = "復元できませんでした。エラー表示を確認してください。"
+                    }
+                } catch {
+                    archiveStatus = "ファイルを読み込めませんでした: \(error.localizedDescription)"
+                }
             }
         }
     }
