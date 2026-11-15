@@ -28,6 +28,15 @@
 - iOS source has not been merged into MIYA & KOHARU production. Keep the PR Draft until review.
 - Never put real home/work coordinates, passwords or live user data into GitHub or CI.
 
+
+## Background snapshot check (best effort, NOT Drive sync)
+- The app now registers a `BGAppRefreshTask` with an explicit Info.plist identifier and enables iOS `fetch` background mode. The XcodeGen workflow checks both settings.
+- **Only when the user enables device-local weekly archives**, the app asks iOS for a future background opportunity. Disabling archives cancels that request.
+- At the system's discretion, a wake can refresh local archive files and verify them. A schedule request is not proof the system actually ran it. Force quitting, battery conditions, OS policies, and permission settings can suppress it.
+- The app additionally checks on launch/resume and after event corrections. Archive verification is a separate operation from real building-entry detection.
+- No background GPS uploads, Google Drive write, or guaranteed exactly-seven-day delivery have been implemented. Apple Developer signing and physical iPhone validation are still needed.
+- A private Google Drive intake folder can accept a weekly CSV/JSON **manually shared** by the user. A connected cloud automation can then attempt validation and import, but no intake path has yet been verified end to end. Never report Drive backup success without checking rows from Drive after the write.
+
 ## Next steps
 1. Verify latest iOS build, Jest, ESLint, seven-day export XCTest, and new local weekly snapshot/restore tests on the exact PR HEAD; fix any failures.
 2. Test real HTTP login / CSRF / cookie lifecycle, denied access and logout with isolated accounts.
