@@ -30,3 +30,12 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.miyalocation.visits.tests
+
+schemes:
+  MIYALocation:
+    build:
+      targets:
+        MIYALocation: all
+    test:
+      targets:
+        - MIYALocationTests
