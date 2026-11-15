@@ -127,6 +127,13 @@ describe('Visit import: actual HTTP cookies and CSRF middleware (isolated test s
         const returned = await request('GET', '/api/plugins/miya-memory/visits/export-v1');
         expect(returned.status).toBe(200);
         expect(returned.body.events).toEqual([FIXTURE]);
+        const corrected = { ...FIXTURE, confirmed_at: '2026-11-15T01:03:00Z' };
+        const correction = await request('POST', '/api/plugins/miya-memory/visits/import-v1',
+            { events: [corrected] }, tokenAfterLogin);
+        expect(correction.status).toBe(200);
+        expect(correction.body).toMatchObject({ added: 0, updated: 1, duplicates: 0 });
+        const afterCorrection = await request('GET', '/api/plugins/miya-memory/visits/export-v1');
+        expect(afterCorrection.body.events).toEqual([corrected]);
         expect((await request('POST', '/api/users/logout', null, tokenAfterLogin)).status).toBe(204);
         expect((await request('GET', '/api/plugins/miya-memory/visits/export-v1')).status).toBe(403);
     });
