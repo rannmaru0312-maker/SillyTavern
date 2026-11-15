@@ -211,16 +211,16 @@ struct VisitEvent: Codable, Identifiable {
         weeklyArchiveStatus = "端末内の週次保管を停止しました。以前のバックアップは削除していません。"
     }
 
-    func refreshWeeklyArchives(now: Date = Date()) {
-        guard weeklyArchiveEnabled else { return }
+    @discardableResult func refreshWeeklyArchives(now: Date = Date()) -> Bool {
+        guard weeklyArchiveEnabled else { return true }
         guard !unreadableFiles.contains(eventsURL.lastPathComponent) else {
             weeklyArchiveStatus = "記録ファイルを読み込めないため、空の週として保存することを防止しました"
-            return
+            return false
         }
         let timestamp = UserDefaults.standard.double(forKey: weeklyStartKey)
         guard timestamp >= 946_684_800 else {
             weeklyArchiveStatus = "週次保管の開始日を設定し直してください"
-            return
+            return false
         }
         do {
             let cursor = UserDefaults.standard.double(forKey: weeklyCursorKey)
@@ -248,8 +248,10 @@ struct VisitEvent: Codable, Identifiable {
                 "端末内の7日分を照合：新規\(report.created)件、既存確認済み\(report.alreadyVerified)件。" +
                 (report.hasMoreCompletedPeriods ? "未処理の期間が残っています。もう一度確認してください。" : "") +
                 " Googleドライブへはまだ保存していません。"
+            return true
         } catch {
             weeklyArchiveStatus = "週次保管を確認できませんでした：\(error.localizedDescription)"
+            return false
         }
     }
 
