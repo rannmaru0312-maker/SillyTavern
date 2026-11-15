@@ -188,6 +188,12 @@ struct ContentView: View {
                     Text("記録は端末内に保存され、サーバーへ自動送信しません。").font(.caption)
                     Button("全地点・全記録を削除", role: .destructive) { showDelete = true }
                 }
+                if recorder.hasStorageReadError {
+                    Section("保全のため記録を停止中") {
+                        Text("既存の保存ファイルを読み込めません。データ消失を防ぐため上書きしていません。バックアップから復元するか、全記録の削除を明示的に選んでください。")
+                            .foregroundStyle(.red)
+                    }
+                }
                 if let message = recorder.errorMessage {
                     Section("確認が必要") { Text(message).foregroundStyle(.red) }
                 }
@@ -197,8 +203,10 @@ struct ContentView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { recorder.refreshWeeklyArchives() }
             }
-            .confirmationDialog("すべての地点と記録を削除しますか？", isPresented: $showDelete) {
-                Button("完全削除", role: .destructive) { recorder.deleteAll() }
+            .confirmationDialog("端末内の地点・訪問記録・週次バックアップを削除しますか？", isPresented: $showDelete) {
+                Button("端末内の全データを削除", role: .destructive) { recorder.deleteAll() }
+            } message: {
+                Text("このiPhone内の位置登録・訪問記録・自動週次バックアップが対象です。手動共有したGoogleドライブやサーバー上のデータは削除されません。")
             }
             .alert("サーバーの訪問記録をすべて削除しますか？", isPresented: $showEraseServer) {
                 Button("削除する", role: .destructive) {
