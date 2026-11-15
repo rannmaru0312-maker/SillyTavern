@@ -19,3 +19,14 @@ targets:
         INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription: アプリを閉じている間も登録地点への到着・退出を検知するため位置情報を使用します。
         TARGETED_DEVICE_FAMILY: '1'
         INFOPLIST_KEY_UIBackgroundModes: [location]
+
+  MIYALocationTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [MIYALocationTests]
+    dependencies:
+      - target: MIYALocation
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.miyalocation.visits.tests
