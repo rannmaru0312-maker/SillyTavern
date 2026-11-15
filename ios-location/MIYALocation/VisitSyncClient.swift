@@ -59,6 +59,7 @@ private struct RemoteVisitEvent: Codable, Equatable {
     @Published private(set) var isSignedIn = false
     @Published private(set) var statusMessage = "サーバーへの送信は無効です"
     @Published private(set) var connectedHost = ""
+    @Published var consentToUpload = false
 
     private var baseURL: URL?
     private var csrfToken: String?
@@ -154,9 +155,9 @@ private struct RemoteVisitEvent: Codable, Equatable {
         }
     }
 
-    func uploadAndVerify(events: [VisitEvent], consented: Bool) async {
+    func uploadAndVerify(events: [VisitEvent]) async {
         guard !isBusy else { return }
-        guard consented, isSignedIn, let base = baseURL, let csrfToken else {
+        guard consentToUpload, isSignedIn, let base = baseURL, let csrfToken else {
             statusMessage = "本人の送信許可とログインが必要です"
             return
         }
@@ -176,7 +177,7 @@ private struct RemoteVisitEvent: Codable, Equatable {
         do {
             // Deliberately foreground-only and opt-in; never send from GPS callbacks.
             for start in stride(from: 0, to: payload.count, by: 20) {
-                guard consented else { throw APIError(message: "送信許可が無効です") }
+                guard consentToUpload else { throw APIError(message: "送信許可が無効です") }
                 let end = min(start + 20, payload.count)
                 let bytes = try JSONEncoder().encode(VisitPayload(events: Array(payload[start..<end])))
                 let answer = try await request(base: base, endpoint: "api/plugins/miya-memory/visits/import-v1",
@@ -192,7 +193,11 @@ private struct RemoteVisitEvent: Codable, Equatable {
             let readback = try await request(base: base, endpoint: "api/plugins/miya-memory/visits/export-v1")
             let remote = try JSONDecoder().decode(ExportReply.self, from: readback)
             guard remote.version == 1 else { throw APIError(message: "読戻しのデータ形式が異なります") }
-            let serverEvents = Dictionary(uniqueKeysWithValues: remote.events.map { ($0.event_id, $0) })
+            let groups = Dictionary(grouping: remote.events, by: \.event_id)
+            guard groups.values.allSatisfy({ $0.count == 1 }) else {
+                throw APIError(message: "サーバーから重複したイベントIDが返されました")
+            }
+            let serverEvents = groups.compactMapValues { $0.first }
             guard expected.allSatisfy({ key, value in serverEvents[key] == value }) else {
                 throw APIError(message: "保存内容の照合が一致しませんでした")
             }
@@ -217,6 +222,7 @@ private struct RemoteVisitEvent: Codable, Equatable {
         csrfToken = nil
         isSignedIn = false
         connectedHost = ""
+        consentToUpload = false
         statusMessage = "端末側の接続を終了しました"
     }
 }
