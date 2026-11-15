@@ -11,6 +11,10 @@ struct ContentView: View {
     @State private var latitude = ""
     @State private var longitude = ""
     @State private var exportURL: URL?
+    @State private var weekStart = VisitWeekExporter.mostRecentCompletedStart()
+    @State private var weeklyExportURL: URL?
+    @State private var weeklyExportMessage = "GPSで検知した出来事だけを書き出します"
+
     @State private var showDelete = false
     @State private var showEraseServer = false
     var body: some View {
@@ -111,6 +115,30 @@ struct ContentView: View {
                     if sync.isBusy { ProgressView("確認中") }
                     Text(sync.statusMessage).font(.caption)
                     Text("同期は手動操作のみです。iPhoneのアプリを閉じている間の送信や、Googleドライブへの保存はまだ行いません。")
+                        .font(.caption)
+                }
+                Section("7日分のGPS記録を書き出す") {
+                    DatePicker("対象期間の開始日（日本時間）", selection: $weekStart,
+                               in: ...VisitWeekExporter.mostRecentCompletedStart(),
+                               displayedComponents: .date)
+                    Text("選んだ日から連続する、終了済み7日間を対象にします。記録がない日を、訪問なしと断定しません。")
+                        .font(.caption)
+                    Button("7日分のCSVを作成する") {
+                        do {
+                            let result = try VisitWeekExporter.export(events: recorder.events,
+                                                                      start: weekStart)
+                            weeklyExportURL = result.file
+                            weeklyExportMessage = "対象期間のGPS記録 \(result.eventCount)件を書き出しました。Googleドライブ保存はまだ実行していません。"
+                        } catch {
+                            weeklyExportURL = nil
+                            weeklyExportMessage = error.localizedDescription
+                        }
+                    }
+                    if let weeklyExportURL {
+                        ShareLink("7日分のCSVを共有・保存", item: weeklyExportURL)
+                    }
+                    Text(weeklyExportMessage).font(.caption)
+                    Text("本人確認済みの時刻と、GPS推定・未確認の時刻を分けて書き出します。保存後の読み戻しは別途必要です。")
                         .font(.caption)
                 }
                 Section("プライバシー") {
