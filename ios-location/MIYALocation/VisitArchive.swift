@@ -61,6 +61,11 @@ enum VisitArchive {
         return data
     }
 
+    private static func sameMillisecond(_ a: Date, _ b: Date) -> Bool {
+        Int64((a.timeIntervalSince1970 * 1000).rounded()) ==
+        Int64((b.timeIntervalSince1970 * 1000).rounded())
+    }
+
     /// Never changes an event's identity or GPS detection timestamp.
     /// A stale backup may not erase a user-confirmed timestamp.
     /// Conflicting confirmed corrections require manual reconciliation instead.
@@ -82,11 +87,11 @@ enum VisitArchive {
                 guard previous.placeID == event.placeID,
                       previous.placeName == event.placeName,
                       previous.type == event.type,
-                      previous.detectedAt == event.detectedAt else {
+                      sameMillisecond(previous.detectedAt, event.detectedAt) else {
                     throw ArchiveError.conflict
                 }
                 if let oldConfirmed = previous.confirmedAt,
-                   let newConfirmed = event.confirmedAt, oldConfirmed != newConfirmed {
+                   let newConfirmed = event.confirmedAt, !sameMillisecond(oldConfirmed, newConfirmed) {
                     throw ArchiveError.conflict
                 }
                 // Prefer a confirmed time over a stale unconfirmed copy.
