@@ -37,6 +37,14 @@
 - No background GPS uploads, Google Drive write, or guaranteed exactly-seven-day delivery have been implemented. Apple Developer signing and physical iPhone validation are still needed.
 - A private Google Drive intake folder can accept a weekly CSV/JSON **manually shared** by the user. A connected cloud automation can then attempt validation and import, but no intake path has yet been verified end to end. Never report Drive backup success without checking rows from Drive after the write.
 
+
+## Macなし・追加費用なしで先に使う方法
+- 専用SwiftUIアプリの実機インストールにはMac/Xcodeでの署名が必要。ユーザーは現時点でMacを持っていないので、**個人利用MVPの実用経路としてiPhone標準ショートカットの「到着」「出発」オートメーションを優先**する。
+- 設定手順は `ios-location/NO_MAC_SHORTCUTS_MVP.md`。iPhoneのメモに場所名・GPS推定時刻を保存する。ショートカットの実行・メモへの記録はまだ実機未検証であり、到着/退出は店舗への実際の入退店を保証しない。
+- `tools/miya-parse-shortcuts-visits.mjs` と `tests/miya-shortcuts-visits.test.js` に、メモの4列書式を解析するオフライン検証器と合成テストを追加。イベントIDは内容から導出した再現可能な照合キーであり、別個の訪問や本人確認を保証しない。
+- **メモの保存はGoogle Driveへの自動保存ではない。** 既存の7日分生活記録と統合する前に、本人の明示共有・重複確認・Google Driveの再読取が必要。
+- Apple公式：<https://support.apple.com/ja-jp/guide/shortcuts/apd8ebfc4e8e/ios> / <https://support.apple.com/ja-jp/guide/shortcuts/apd602971e63/ios>
+
 ## Next steps
 1. Verify latest iOS build, Jest, ESLint, seven-day export XCTest, and new local weekly snapshot/restore tests on the exact PR HEAD; fix any failures.
 2. Test real HTTP login / CSRF / cookie lifecycle, denied access and logout with isolated accounts.
