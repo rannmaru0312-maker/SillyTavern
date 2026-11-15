@@ -111,6 +111,46 @@ final class VisitLocalWeekArchiveTests: XCTestCase {
         XCTAssertEqual(repeated.alreadyVerified, 2)
     }
 
+    func testAllSavedWeeksAreReverifiedBeforeTrustingCheckpoint() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let anchor = utc("2026-11-07T15:00:00Z")
+        let now = utc("2026-11-15T01:00:00Z")
+        let result = try VisitLocalWeekArchive.writeCompleted(
+            events: [exampleEvent()], anchor: anchor, now: now, directory: folder)
+        XCTAssertNoThrow(try VisitLocalWeekArchive.verifyCheckpoint(
+            anchor: anchor, cursor: result.nextPeriodStart, directory: folder))
+        let file = try XCTUnwrap(result.lastFile)
+        try Data("corrupt data".utf8).write(to: file)
+        XCTAssertThrowsError(try VisitLocalWeekArchive.verifyCheckpoint(
+            anchor: anchor, cursor: result.nextPeriodStart, directory: folder))
+    }
+
+    func testMissingPreviouslySavedWeekStopsResumeInsteadOfSkippingIt() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let anchor = utc("2026-11-07T15:00:00Z")
+        let now = utc("2026-11-15T01:00:00Z")
+        let result = try VisitLocalWeekArchive.writeCompleted(
+            events: [exampleEvent()], anchor: anchor, now: now, directory: folder)
+        try FileManager.default.removeItem(at: XCTUnwrap(result.lastFile))
+        XCTAssertThrowsError(try VisitLocalWeekArchive.verifyCheckpoint(
+            anchor: anchor, cursor: result.nextPeriodStart, directory: folder))
+    }
+
+    func testFileNameAndJsonHashCannotBeInconsistent() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let anchor = utc("2026-11-07T15:00:00Z")
+        let now = utc("2026-11-15T01:00:00Z")
+        let receipt = try VisitLocalWeekArchive.writeCompleted(
+            events: [exampleEvent()], anchor: anchor, now: now, directory: folder)
+        let source = try XCTUnwrap(receipt.lastFile)
+        let renamed = folder.appendingPathComponent("week-2026-11-08-invalidhash.json")
+        try FileManager.default.moveItem(at: source, to: renamed)
+        XCTAssertThrowsError(try VisitLocalWeekArchive.verifyExisting(in: folder))
+    }
+
     func testUnfinishedWeekIsNotArchived() throws {
         let folder = try makeFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
