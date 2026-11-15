@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var recorder: LocationRecorder
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var localWeekAnchor = VisitWeekExporter.mostRecentCompletedStart()
     @StateObject private var sync = VisitSyncClient()
     @State private var serverURL = ""
     @State private var loginHandle = ""
@@ -145,6 +147,28 @@ struct ContentView: View {
                     Text("本人確認済みの時刻と、GPS推定・未確認の時刻を分けて書き出します。保存後の読み戻しは別途必要です。")
                         .font(.caption)
                 }
+                Section("7日ごとの端末内自動保管") {
+                    Text("アプリの起動・復帰時や記録更新時に、終了済み7日間のバックアップを端末内に作成し、読み戻して確認します。iOSは指定日時での実行を保証しません。")
+                        .font(.caption)
+                    if recorder.weeklyArchiveEnabled {
+                        Button("終了した7日分を今すぐ照合") { recorder.refreshWeeklyArchives() }
+                        Button("端末内の週次自動保管を停止", role: .destructive) {
+                            recorder.disableWeeklyArchives()
+                        }
+                    } else {
+                        DatePicker("最初の7日間の開始日", selection: $localWeekAnchor,
+                                   in: ...Date(), displayedComponents: .date)
+                        Button("端末内の週次自動保管を有効にする") {
+                            recorder.enableWeeklyArchives(from: localWeekAnchor)
+                        }
+                    }
+                    Text(recorder.weeklyArchiveStatus).font(.caption)
+                    if let archiveURL = recorder.latestWeeklyArchiveURL {
+                        ShareLink("確認済みの最新7日分をGoogleドライブ等へ手動共有", item: archiveURL)
+                    }
+                    Text("端末内での保管成功は、Googleドライブへのアップロード成功を意味しません。")
+                        .font(.caption)
+                }
                 Section("訪問記録のバックアップと復元（手動）") {
                     Button("記録のJSONバックアップを作成") {
                         archiveURL = recorder.exportEventArchive()
@@ -169,6 +193,10 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("みやの生活記録")
+            .onAppear { recorder.refreshWeeklyArchives() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { recorder.refreshWeeklyArchives() }
+            }
             .confirmationDialog("すべての地点と記録を削除しますか？", isPresented: $showDelete) {
                 Button("完全削除", role: .destructive) { recorder.deleteAll() }
             }
