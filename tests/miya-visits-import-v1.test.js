@@ -93,6 +93,29 @@ describe('MIYA opt-in visit import', () => {
         expect(extra.statusCode).toBe(400);
         expect(get(router, user('alice')).body.events).toHaveLength(1);
     });
+    test('user can confirm and correct time without duplicating an existing event', () => {
+        const owner = user('alice');
+        const first = send(router, { ...owner, body: { events: [EVENT] } });
+        expect(first.body).toMatchObject({ added: 1, updated: 0, duplicates: 0 });
+        const confirmation = { ...EVENT, confirmed_at: '2026-11-15T01:02:00Z' };
+        const amended = send(router, { ...owner, body: { events: [confirmation] } });
+        expect(amended.body).toMatchObject({ added: 0, updated: 1, duplicates: 0 });
+        const repeated = send(router, { ...owner, body: { events: [confirmation] } });
+        expect(repeated.body).toMatchObject({ added: 0, updated: 0, duplicates: 1 });
+        const corrected = { ...EVENT, confirmed_at: '2026-11-15T01:03:00Z' };
+        expect(send(router, { ...owner, body: { events: [corrected] } }).body.updated).toBe(1);
+        expect(get(router, owner).body.events).toEqual([corrected]);
+        const otherAccount = get(router, user('bob'));
+        expect(otherAccount.body.events).toEqual([]);
+    });
+    test('correcting confirmed time cannot alter immutable event metadata', () => {
+        const owner = user('alice');
+        expect(send(router, { ...owner, body: { events: [EVENT] } }).statusCode).toBe(200);
+        const forged = { ...EVENT, place_name: 'Different place',
+            confirmed_at: '2026-11-15T01:02:00Z' };
+        expect(send(router, { ...owner, body: { events: [forged] } }).statusCode).toBe(409);
+        expect(get(router, owner).body.events).toEqual([EVENT]);
+    });
     test('server-side delete is explicit, account-scoped, and idempotent', () => {
         const alice = user('alice');
         const bob = user('bob');
