@@ -312,7 +312,13 @@ struct VisitEvent: Codable, Identifiable {
                     }
                 }
                 for start in weeksToRefresh.sorted() {
-                    guard refreshCompletedWeek(containing: start) else { return false }
+                    if !refreshCompletedWeek(containing: start) {
+                        // The event restore has already been written successfully.
+                        // Report the weekly backup problem without falsely saying
+                        // the underlying restore did not happen.
+                        errorMessage = "訪問記録は復元済みですが、週次バックアップの確認に失敗しました。"
+                        return true
+                    }
                 }
                 refreshWeeklyArchives()
             }
