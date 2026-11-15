@@ -90,6 +90,27 @@ final class VisitLocalWeekArchiveTests: XCTestCase {
         XCTAssertEqual(payload.payload.periodEndInclusive, "2026-11-14")
     }
 
+    func testTwentyFourWeekBatchCanResumeFromVerifiedCheckpoint() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let anchor = utc("2026-01-01T15:00:00Z") // Jan 2 in Japan
+        let now = utc("2026-02-20T15:00:00Z") // 7 completed periods
+        let first = try VisitLocalWeekArchive.writeCompleted(
+            events: [], anchor: anchor, now: now, directory: folder, maxPeriods: 2)
+        XCTAssertEqual(first.created, 2)
+        XCTAssertTrue(first.hasMoreCompletedPeriods)
+        let second = try VisitLocalWeekArchive.writeCompleted(
+            events: [], anchor: first.nextPeriodStart, now: now,
+            directory: folder, maxPeriods: 2)
+        XCTAssertEqual(second.created, 2)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path).count, 4)
+        // Repeating a completed batch must read and verify, not create duplicates.
+        let repeated = try VisitLocalWeekArchive.writeCompleted(
+            events: [], anchor: anchor, now: now, directory: folder, maxPeriods: 2)
+        XCTAssertEqual(repeated.created, 0)
+        XCTAssertEqual(repeated.alreadyVerified, 2)
+    }
+
     func testUnfinishedWeekIsNotArchived() throws {
         let folder = try makeFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
