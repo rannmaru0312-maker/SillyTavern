@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { withFileLock } = require('./v3-core/file-lock.js');
 
 const validUser = /^[A-Za-z0-9_-]{1,64}$/;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -94,19 +95,27 @@ function register(router) {
             seen.set(item.event_id, item);
         }
         try {
-            const store = readStore(handle);
-            const byId = new Map(store.events.map(e => [e.event_id, e]));
-            let added = 0;
-            for (const item of seen.values()) {
-                const old = byId.get(item.event_id);
-                if (old && JSON.stringify(old) !== JSON.stringify(item)) {
-                    return res.status(409).json({ error: 'Conflicting event ID' });
+            // Keep read + deduplication + write under a cross-process lock so
+            // concurrent requests on one server do not lose each other's events.
+            const file = storagePath(handle);
+            const result = withFileLock(file, () => {
+                const store = readStore(handle);
+                const byId = new Map(store.events.map(e => [e.event_id, e]));
+                let added = 0;
+                for (const item of seen.values()) {
+                    const old = byId.get(item.event_id);
+                    if (old && JSON.stringify(old) !== JSON.stringify(item)) {
+                        return { conflict: true };
+                    }
+                    if (!old) { byId.set(item.event_id, item); added++; }
                 }
-                if (!old) { byId.set(item.event_id, item); added++; }
-            }
-            if (byId.size > 5000) return res.status(409).json({ error: 'Per-account event limit' });
-            if (added) writeStore(handle, { version: 1, events: [...byId.values()] });
-            return res.status(200).json({ success: true, added, duplicates: seen.size - added });
+                if (byId.size > 5000) return { limit: true };
+                if (added) writeStore(handle, { version: 1, events: [...byId.values()] });
+                return { added, duplicates: seen.size - added };
+            });
+            if (result.conflict) return res.status(409).json({ error: 'Conflicting event ID' });
+            if (result.limit) return res.status(409).json({ error: 'Per-account event limit' });
+            return res.status(200).json({ success: true, ...result });
         } catch {
             return res.status(500).json({ error: 'Visit storage unavailable' });
         }
