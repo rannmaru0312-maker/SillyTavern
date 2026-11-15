@@ -43,15 +43,16 @@ enum VisitArchive {
         let ids = Set(events.map(\.id))
         guard ids.count == events.count else { throw ArchiveError.invalid }
         for event in events {
+            let confirmedValid = event.confirmedAt.map { confirmed in
+                confirmed.timeIntervalSince1970.isFinite &&
+                (946_684_800...4_102_444_800).contains(confirmed.timeIntervalSince1970)
+            } ?? true
             guard ["entry", "exit"].contains(event.type),
                   !event.placeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   event.placeName.count <= 100,
                   event.detectedAt.timeIntervalSince1970.isFinite,
                   (946_684_800...4_102_444_800).contains(event.detectedAt.timeIntervalSince1970),
-                  event.confirmedAt.map {
-                      $0.timeIntervalSince1970.isFinite &&
-                      (946_684_800...4_102_444_800).contains($0.timeIntervalSince1970)
-                  } ?? true else {
+                  confirmedValid else {
                 throw ArchiveError.invalid
             }
         }
