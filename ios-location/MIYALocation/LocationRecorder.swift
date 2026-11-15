@@ -225,11 +225,23 @@ struct VisitEvent: Codable, Identifiable {
         do {
             let cursor = UserDefaults.standard.double(forKey: weeklyCursorKey)
             let pending = cursor >= timestamp ? cursor : timestamp
+            // A previously advanced cursor is not proof the archived files
+            // still exist or are unmodified. Reverify before skipping them.
+            try VisitLocalWeekArchive.verifyCheckpoint(
+                anchor: Date(timeIntervalSince1970: timestamp),
+                cursor: Date(timeIntervalSince1970: pending),
+                directory: weeklyArchivesURL
+            )
             let report = try VisitLocalWeekArchive.writeCompleted(
                 events: events, anchor: Date(timeIntervalSince1970: pending),
                 now: now, directory: weeklyArchivesURL
             )
-            // Advance only after the file(s) have been written and verified.
+            // Before claiming progress, verify every archived week again.
+            try VisitLocalWeekArchive.verifyCheckpoint(
+                anchor: Date(timeIntervalSince1970: timestamp),
+                cursor: report.nextPeriodStart,
+                directory: weeklyArchivesURL
+            )
             UserDefaults.standard.set(report.nextPeriodStart.timeIntervalSince1970, forKey: weeklyCursorKey)
             latestWeeklyArchiveURL = report.lastFile ?? latestWeeklyArchiveURL
             weeklyArchiveStatus =
