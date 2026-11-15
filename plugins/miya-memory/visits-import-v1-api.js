@@ -114,6 +114,11 @@ function register(router) {
                             return { conflict: true };
                         }
                         if (previousConfirmation !== nextConfirmation) {
+                            // A stale device must not silently erase a previously
+                            // confirmed timestamp; explicit deletion is separate.
+                            if (previousConfirmation != null && nextConfirmation == null) {
+                                return { conflict: true };
+                            }
                             byId.set(item.event_id, item);
                             updated++;
                         }
