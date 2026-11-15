@@ -2,7 +2,7 @@
 
 ## Verified so far
 - iOS Simulator unsigned builds passed for earlier commits (most recent prior known success: a20180f). See PR checks for the **latest HEAD** result; a passing build is not an iPhone field test.
-- Node/Jest and ESLint checks have passed on earlier commits. The new Swift sync client and server file-lock changes must pass their own latest checks.
+- The iOS Simulator build, Jest and ESLint checks have passed on PR commit fbcb3c3 (confirmed 2026-11-15). See GitHub checks for the current HEAD; passing CI is not an iPhone field test.
 
 ## Features in source code
 - SwiftUI interface to register a location by explicit coordinates or current location, start/stop monitoring, and inspect geofence entry/exit events.
@@ -14,9 +14,9 @@
 
 ## Significant limitations
 - Upload happens only while app is open and the user presses the button. **No background upload**, automatic account login or unattended seven-day Google Drive sync has been implemented.
-- Server stores events in private local JSON files, which may be **ephemeral on cloud hosts**, not durable across deployment or scalable to multiple hosts. There is no production database, retention policy, audit trail, or complete rate limiting. Delete-all requires user login, explicit confirmation, and server readback.
+- Server stores events in private local JSON files, which may be **ephemeral on cloud hosts**, not durable across deployment or scalable to multiple hosts. Render workspace inspection on 2026-11-15 found no existing Render Postgres instance and the running app is on the free plan: **do not enable GPS event uploads to this instance or claim permanent persistence**. There is no production database, retention policy, audit trail, or complete rate limiting. Delete-all requires user login, explicit confirmation, and server readback.
 - Login uses the existing session/cookie authentication. An isolated HTTP test with cookie-session and csrf-sync has been added, but full real HTTP integration with the actual SillyTavern server is still required.
-- A confirmed_at change after an earlier upload causes a 409 conflict by design (events are immutable); an authenticated event correction protocol is needed.
+- A confirmed_at change after an earlier upload is now supported for the same authenticated user and event ID. The immutable event identity (event ID, place and detected time) cannot change; conflicting metadata still returns HTTP 409. Confirmation edits need real-device and HTTP round-trip tests.
 - A geofence callback is not evidence of an actual building entrance. The estimated time must remain visibly distinct from user-confirmed time.
 - iPhone installation/signing and background location behavior are **not tested**. A Mac/Xcode or a compatible signed build and Apple's authorization requirements are needed before actual device use.
 - iOS source has not been merged into MIYA & KOHARU production. Keep the PR Draft until review.
