@@ -5,6 +5,10 @@ on:
     paths:
       - 'ios-location/**'
       - '.github/workflows/ios-location-build.yml'
+concurrency:
+  group: miya-ios-location-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 jobs:
@@ -21,6 +25,7 @@ jobs:
         run: |
           xcodebuild -project ios-location/MIYALocation.xcodeproj -scheme MIYALocation -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
       - name: Test seven-day exporter on iOS simulator
+        timeout-minutes: 12
         run: |
           SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin)["devices"]; matches=[d["udid"] for items in data.values() for d in items if d.get("name","").startswith("iPhone") and d.get("isAvailable",True)]; print(matches[0] if matches else "")')"
           test -n "$SIM_ID" || { echo "No available iPhone simulator; cannot claim test success"; exit 1; }
