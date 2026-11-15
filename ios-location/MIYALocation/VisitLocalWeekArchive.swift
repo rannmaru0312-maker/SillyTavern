@@ -33,13 +33,15 @@ enum VisitLocalWeekArchive {
         case invalidAnchor
         case eventLimit
         case existingArchiveCorrupted
+        case archiveMissing
         case readbackMismatch
 
         var errorDescription: String? {
             switch self {
             case .invalidAnchor: return "バックアップの開始日が正しくありません"
             case .eventLimit: return "週の記録が多すぎます。手動で分割を確認してください"
-            case .existingArchiveCorrupted: return "既存の週次バックアップが読めないため上書きせず中止しました"
+            case .existingArchiveCorrupted: return "既存の週次バックアップが破損または改変されています。上書きせず保護しました"
+            case .archiveMissing: return "保管済みのはずの7日分が見つかりません。保存済みと報告せず停止しました"
             case .readbackMismatch: return "ローカル保存後の再読込照合に失敗しました"
             }
         }
@@ -63,6 +65,67 @@ enum VisitLocalWeekArchive {
         formatter.timeZone = timezone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
+    }
+
+    /// Check all existing completed-week archives without modifying a single
+    /// byte. This catches corruption or accidental removal *after* a previously
+    /// successful write, not just the immediate readback after creation.
+    static func verifyExisting(in directory: URL) throws -> Set<String> {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: directory.path) else { return [] }
+        let names = try manager.contentsOfDirectory(atPath: directory.path)
+        let encoder = encoder()
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        var coveredPeriods = Set<String>()
+        for name in names where name.hasPrefix("week-") && name.hasSuffix(".json") {
+            let file = directory.appendingPathComponent(name)
+            let bytes = try Data(contentsOf: file)
+            guard bytes.count <= 5_000_000,
+                  let envelope = try? decoder.decode(Envelope.self, from: bytes),
+                  envelope.payload.version == 1,
+                  envelope.payload.timezone == "Asia/Tokyo",
+                  !envelope.payload.coverageVerified,
+                  envelope.payload.events.count <= 5000 else {
+                throw Failure.existingArchiveCorrupted
+            }
+            let hash = digest(try encoder.encode(envelope.payload))
+            let expectedName = "week-\(envelope.payload.periodStart)-\(hash).json"
+            guard hash == envelope.sha256, expectedName == name else {
+                throw Failure.existingArchiveCorrupted
+            }
+            coveredPeriods.insert(envelope.payload.periodStart)
+        }
+        return coveredPeriods
+    }
+
+    /// A saved cursor is only a claim. Independently confirm that every
+    /// completed 7-day period before it still has a valid on-disk archive.
+    static func verifyCheckpoint(anchor: Date, cursor: Date,
+                                 directory: URL) throws {
+        guard let calendar = VisitWeekExporter.japanCalendar() else {
+            throw Failure.invalidAnchor
+        }
+        let start = calendar.startOfDay(for: anchor)
+        let end = calendar.startOfDay(for: cursor)
+        guard start <= end else { throw Failure.invalidAnchor }
+        let present = try verifyExisting(in: directory)
+        var day = start
+        var count = 0
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        while day < end {
+            guard let next = calendar.date(byAdding: .day, value: 7, to: day),
+                  next <= end, count < 1200 else { throw Failure.invalidAnchor }
+            guard present.contains(formatter.string(from: day)) else {
+                throw Failure.archiveMissing
+            }
+            count += 1
+            day = next
+        }
     }
 
     /// If no GPS events were observed in a week, the file contains 0 events
