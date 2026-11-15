@@ -7,6 +7,8 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var localWeekAnchor = VisitWeekExporter.mostRecentCompletedStart()
     @StateObject private var sync = VisitSyncClient()
+    @StateObject private var folderSync = VisitArchiveFolderSync()
+    @State private var showMirrorFolderPicker = false
     @State private var serverURL = ""
     @State private var loginHandle = ""
     @State private var loginPassword = ""
@@ -169,6 +171,33 @@ struct ContentView: View {
                     Text("端末内での保管成功は、Googleドライブへのアップロード成功を意味しません。")
                         .font(.caption)
                 }
+                Section("ファイルアプリの保存先へコピー（任意）") {
+                    Text("iPhoneのファイルアプリにGoogleドライブ等が表示されていれば、本人がそのフォルダーを選べます。コピーを許可するまでは記録を送りません。")
+                        .font(.caption)
+                    Button("保存先フォルダーを選択") { showMirrorFolderPicker = true }
+                    if folderSync.hasSelectedFolder {
+                        if folderSync.isEnabled {
+                            Button("週次ファイルをコピー・照合する") {
+                                recorder.refreshWeeklyArchives()
+                                folderSync.copyIfEnabled(from: recorder.weeklyArchiveSourceURL)
+                            }
+                            .disabled(folderSync.isBusy)
+                            Button("外部フォルダーへのコピーを停止", role: .destructive) {
+                                folderSync.disable()
+                            }
+                        } else {
+                            Button("外部フォルダーへのコピーを有効にする") {
+                                folderSync.enable()
+                            }
+                        }
+                        Button("保存先の登録を解除する") {
+                            folderSync.forgetFolder()
+                        }
+                    }
+                    Text(folderSync.status).font(.caption)
+                    Text("ファイルアプリ内のコピーを読み戻しても、Googleドライブのクラウドにアップロードされたことまでは証明できません。別途クラウド側の読み戻し確認が必要です。")
+                        .font(.caption)
+                }
                 Section("訪問記録のバックアップと復元（手動）") {
                     Button("記録のJSONバックアップを作成") {
                         archiveURL = recorder.exportEventArchive()
@@ -199,9 +228,27 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("みやの生活記録")
-            .onAppear { recorder.refreshWeeklyArchives() }
+            .onAppear {
+                recorder.refreshWeeklyArchives()
+                folderSync.copyIfEnabled(from: recorder.weeklyArchiveSourceURL)
+            }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { recorder.refreshWeeklyArchives() }
+                if phase == .active {
+                    recorder.refreshWeeklyArchives()
+                    folderSync.copyIfEnabled(from: recorder.weeklyArchiveSourceURL)
+                }
+            }
+            .fileImporter(isPresented: $showMirrorFolderPicker,
+                          allowedContentTypes: [.folder],
+                          allowsMultipleSelection: false) { result in
+                do {
+                    if let selected = try result.get().first {
+                        folderSync.selectFolder(selected)
+                    }
+                } catch {
+                    // The caller has not authorized any upload.
+                    folderSync.disable()
+                }
             }
             .confirmationDialog("端末内の地点・訪問記録・週次バックアップを削除しますか？", isPresented: $showDelete) {
                 Button("端末内の全データを削除", role: .destructive) { recorder.deleteAll() }
