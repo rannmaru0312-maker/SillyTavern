@@ -118,7 +118,9 @@ export function validateGPSWeek(source, options = {}) {
             end: event.type === 'exit' ? local.slice(11, 16) : '',
             category: event.type === 'entry' ? '到着推定（GPS）' : '退出推定（GPS）',
             location: safeLabel(event.placeName),
-            notes: (event.confirmedAt != null ? '本人確認時刻' : 'GPS推定・本人未確認') +
+            notes: (event.confirmedAt != null ?
+                '本人確認時刻: ' + new Date(event.confirmedAt).toISOString() :
+                'GPS推定・本人未確認') +
                 '; GPS検知: ' + new Date(event.detectedAt).toISOString() +
                 '; source=ios_geofence; event_id=' + id,
             confirmed: event.confirmedAt != null,
