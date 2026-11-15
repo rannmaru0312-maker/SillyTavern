@@ -126,6 +126,40 @@ struct VisitEvent: Codable, Identifiable {
         if !save(places, to: placesURL) { places = oldPlaces }
         if !save(events, to: eventsURL) { events = oldEvents }
     }
+    /// User-triggered archive of event IDs and timestamps; exact coordinates are excluded.
+    func exportEventArchive() -> URL? {
+        do {
+            let data = try VisitArchive.create(events)
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("miya-visit-backup-\(UUID().uuidString).json")
+            try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+            return url
+        } catch {
+            errorMessage = "バックアップ作成に失敗しました: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    /// Import requires a user-selected local file and never sends data to a server.
+    @discardableResult func restoreEventArchive(from url: URL) -> Bool {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let bytes = try Data(contentsOf: url)
+            let merged = try VisitArchive.merge(current: events, archive: bytes)
+            let old = events
+            events = merged
+            if !save(events, to: eventsURL) {
+                events = old
+                return false
+            }
+            return true
+        } catch {
+            errorMessage = "バックアップ復元を中止しました: \(error.localizedDescription)"
+            return false
+        }
+    }
+
     func exportCSV() -> URL? {
         func quote(_ s: String) -> String { "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
         let formatter = ISO8601DateFormatter()
