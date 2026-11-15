@@ -47,7 +47,10 @@ struct VisitEvent: Codable, Identifiable {
     @discardableResult private func save<T: Encodable>(_ value: T, to url: URL) -> Bool {
         do {
             try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
-            try JSONEncoder().encode(value).write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+            // Region events may arrive with the device locked. Files remain
+            // protected until the first unlock after each reboot.
+            try JSONEncoder().encode(value).write(
+                to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             return true
         } catch { errorMessage = "保存失敗: \(error.localizedDescription)"; return false }
     }
@@ -173,7 +176,8 @@ struct VisitEvent: Codable, Identifiable {
         catch { errorMessage = "書き出し失敗: \(error.localizedDescription)"; return nil }
     }
     private func record(_ region: CLRegion, type: String) {
-        guard monitoring, region.identifier.hasPrefix(prefix),
+        guard monitoring, authorization == .authorizedAlways,
+              region.identifier.hasPrefix(prefix),
               let id = UUID(uuidString: String(region.identifier.dropFirst(prefix.count))),
               let place = places.first(where: { $0.id == id }) else { return }
         let now = Date()
