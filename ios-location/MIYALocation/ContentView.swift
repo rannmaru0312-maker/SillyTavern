@@ -178,24 +178,26 @@ struct ContentView: View {
                     if folderSync.hasSelectedFolder {
                         if folderSync.isEnabled {
                             Button("週次ファイルをコピー・照合する") {
-                                recorder.refreshWeeklyArchives()
+                                guard recorder.weeklyArchiveEnabled,
+                                      recorder.refreshWeeklyArchives() else { return }
                                 folderSync.copyIfEnabled(from: recorder.weeklyArchiveSourceURL)
                             }
-                            .disabled(folderSync.isBusy)
+                            .disabled(folderSync.isBusy || !recorder.weeklyArchiveEnabled)
                             Button("外部フォルダーへのコピーを停止", role: .destructive) {
                                 folderSync.disable()
                             }
                         } else {
                             Button("外部フォルダーへのコピーを有効にする") {
-                                folderSync.enable()
+                                if recorder.weeklyArchiveEnabled { folderSync.enable() }
                             }
+                            .disabled(!recorder.weeklyArchiveEnabled)
                         }
                         Button("保存先の登録を解除する") {
                             folderSync.forgetFolder()
                         }
                     }
                     Text(folderSync.status).font(.caption)
-                    Text("ファイルアプリ内のコピーを読み戻しても、Googleドライブのクラウドにアップロードされたことまでは証明できません。別途クラウド側の読み戻し確認が必要です。")
+                    Text("端末内の週次保管を有効にした場合だけコピーできます。ファイルアプリ内で読み戻せても、Googleドライブのクラウド上にアップロードされた証明にはなりません。")
                         .font(.caption)
                 }
                 Section("訪問記録のバックアップと復元（手動）") {
@@ -229,12 +231,14 @@ struct ContentView: View {
             }
             .navigationTitle("みやの生活記録")
             .onAppear {
-                recorder.refreshWeeklyArchives()
-                folderSync.copyIfEnabled(from: recorder.weeklyArchiveSourceURL)
+                if recorder.weeklyArchiveEnabled && recorder.refreshWeeklyArchives() {
+                    folderSync.copyIfEnabled(from: recorder.weeklyArchiveSourceURL)
+                }
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active {
-                    recorder.refreshWeeklyArchives()
+                if phase == .active,
+                   recorder.weeklyArchiveEnabled,
+                   recorder.refreshWeeklyArchives() {
                     folderSync.copyIfEnabled(from: recorder.weeklyArchiveSourceURL)
                 }
             }
