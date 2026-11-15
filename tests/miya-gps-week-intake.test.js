@@ -26,7 +26,7 @@ function makeArchive({ changes = {}, events = [event], name } = {}) {
         periodEndInclusive: '2026-11-14',
         timezone: 'Asia/Tokyo',
         coverageVerified: false,
-        events,
+        events: events.map(value => ({ ...value })),
         ...changes,
     });
     const canonical = Buffer.from(JSON.stringify(payload));
