@@ -10,15 +10,21 @@ targets:
     type: application
     platform: iOS
     sources: [MIYALocation]
+    info:
+      path: MIYALocation/Info.plist
+      properties:
+        CFBundleDisplayName: みやの生活記録
+        CFBundleShortVersionString: "0.1"
+        CFBundleVersion: "1"
+        NSLocationWhenInUseUsageDescription: 登録した場所の座標取得と訪問記録のため位置情報を使用します。
+        NSLocationAlwaysAndWhenInUseUsageDescription: アプリを閉じている間も登録地点への到着・退出を検知するため位置情報を使用します。
+        UIBackgroundModes: [location, fetch]
+        BGTaskSchedulerPermittedIdentifiers:
+          - jp.miyalocation.visits.archive-refresh
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.miyalocation.visits
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: みやの生活記録
-        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: 登録した場所の座標取得と訪問記録のため位置情報を使用します。
-        INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription: アプリを閉じている間も登録地点への到着・退出を検知するため位置情報を使用します。
         TARGETED_DEVICE_FAMILY: '1'
-        INFOPLIST_KEY_UIBackgroundModes: [location]
 
   MIYALocationTests:
     type: bundle.unit-test
