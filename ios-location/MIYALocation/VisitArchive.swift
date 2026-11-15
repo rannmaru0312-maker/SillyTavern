@@ -47,7 +47,11 @@ enum VisitArchive {
                   !event.placeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   event.placeName.count <= 100,
                   event.detectedAt.timeIntervalSince1970.isFinite,
-                  event.confirmedAt?.timeIntervalSince1970.isFinite ?? true else {
+                  (946_684_800...4_102_444_800).contains(event.detectedAt.timeIntervalSince1970),
+                  event.confirmedAt.map {
+                      $0.timeIntervalSince1970.isFinite &&
+                      (946_684_800...4_102_444_800).contains($0.timeIntervalSince1970)
+                  } ?? true else {
                 throw ArchiveError.invalid
             }
         }
