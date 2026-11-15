@@ -25,6 +25,7 @@ struct VisitEvent: Codable, Identifiable {
     @Published var errorMessage: String?
     @Published private(set) var weeklyArchiveEnabled = UserDefaults.standard.bool(forKey: "miya-weekly-local-archive-enabled")
     @Published private(set) var weeklyArchiveStatus = "7日ごとの端末内保管は未設定です。Googleドライブへの自動保存ではありません。"
+    @Published private(set) var latestWeeklyArchiveURL: URL?
     @Published private(set) var currentLocation: CLLocationCoordinate2D?
     private let manager = CLLocationManager()
     private let prefix = "miya-visit-"
@@ -173,6 +174,7 @@ struct VisitEvent: Codable, Identifiable {
                 events: events, anchor: Date(timeIntervalSince1970: timestamp),
                 now: now, directory: weeklyArchivesURL
             )
+            latestWeeklyArchiveURL = report.lastFile
             weeklyArchiveStatus =
                 "端末内の7日分を照合：新規\(report.created)件、既存確認済み\(report.alreadyVerified)件。" +
                 (report.hasMoreCompletedPeriods ? "未処理の期間が残っています。もう一度確認してください。" : "") +
