@@ -202,12 +202,14 @@ struct VisitEvent: Codable, Identifiable {
         UserDefaults.standard.set(start.timeIntervalSince1970, forKey: weeklyCursorKey)
         UserDefaults.standard.set(true, forKey: weeklyEnabledKey)
         weeklyArchiveEnabled = true
+        LocationBackgroundRefresh.schedule()
         refreshWeeklyArchives()
     }
 
     func disableWeeklyArchives() {
         UserDefaults.standard.set(false, forKey: weeklyEnabledKey)
         weeklyArchiveEnabled = false
+        LocationBackgroundRefresh.cancel()
         weeklyArchiveStatus = "端末内の週次保管を停止しました。以前のバックアップは削除していません。"
     }
 
