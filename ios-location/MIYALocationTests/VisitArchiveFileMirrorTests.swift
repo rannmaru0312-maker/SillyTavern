@@ -91,6 +91,37 @@ final class VisitArchiveFileMirrorTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: target.path).count, 2)
     }
 
+    func testRevokedConsentStopsAtNextFileBoundaryAndCanResume() throws {
+        let local = try directory()
+        let target = try directory()
+        defer {
+            try? FileManager.default.removeItem(at: local)
+            try? FileManager.default.removeItem(at: target)
+        }
+        _ = try VisitLocalWeekArchive.writeCompleted(
+            events: [], anchor: utc("2026-10-03T15:00:00Z"),
+            now: utc("2026-11-15T01:00:00Z"), directory: local)
+        var visits = 0
+        XCTAssertThrowsError(try VisitArchiveFileMirror.copyVerifiedArchives(
+            from: local, to: target, shouldCancel: {
+                visits += 1
+                return visits > 1
+            }
+        )) { error in
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: target.path).count, 1)
+        let resumed = try VisitArchiveFileMirror.copyVerifiedArchives(
+            from: local, to: target, maxFiles: 24)
+        XCTAssertGreaterThan(resumed.copied, 0)
+        XCTAssertGreaterThan(resumed.existingVerified, 0)
+        XCTAssertFalse(resumed.moreFilesRemain)
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: target.path).count,
+            try FileManager.default.contentsOfDirectory(atPath: local.path).count
+        )
+    }
+
     func testTamperedLocalArchiveIsRejectedBeforeExport() throws {
         let local = try directory()
         let target = try directory()
