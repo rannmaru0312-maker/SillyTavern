@@ -90,14 +90,20 @@ enum VisitArchiveFileMirror {
         let all = try FileManager.default.contentsOfDirectory(atPath: source.path)
             .filter { $0.hasPrefix("week-") && $0.hasSuffix(".json") }
             .sorted()
-        let selected = all.prefix(maxFiles)
         var copied = 0
         var already = 0
-        for name in selected {
+        var checked = 0
+        var pending = false
+        for name in all {
             let src = source.appendingPathComponent(name)
             let dst = destination.appendingPathComponent(name)
             let data = try Data(contentsOf: src)
             let existed = FileManager.default.fileExists(atPath: dst.path)
+            if !existed && copied >= maxFiles {
+                pending = true
+                continue
+            }
+            checked += 1
             if existed {
                 guard try readCoordinated(dst) == data else {
                     throw Failure.conflictingExistingCopy
@@ -114,8 +120,8 @@ enum VisitArchiveFileMirror {
 
         return Receipt(
             copied: copied, existingVerified: already,
-            filesInspected: selected.count,
-            moreFilesRemain: all.count > selected.count
+            filesInspected: checked,
+            moreFilesRemain: pending
         )
     }
 }
