@@ -3,6 +3,10 @@ import CoreLocation
 
 struct ContentView: View {
     @EnvironmentObject private var recorder: LocationRecorder
+    @StateObject private var sync = VisitSyncClient()
+    @State private var serverURL = ""
+    @State private var loginHandle = ""
+    @State private var loginPassword = ""
     @State private var placeName = ""
     @State private var latitude = ""
     @State private var longitude = ""
@@ -68,6 +72,45 @@ struct ContentView: View {
                         ShareLink("CSVを共有", item: exportURL)
                     }
                     Button("CSVファイルを作成") { exportURL = recorder.exportCSV() }
+                }
+                Section("サーバーへの手動同期（任意）") {
+                    Text("利用者が許可した場合だけ、登録先の名前・到着/退出種別・推定/確認時刻を送信します。GPS座標や移動経路は送信しません。")
+                        .font(.caption)
+                    TextField("https://正規サーバーURL", text: $serverURL)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("ログインID", text: $loginHandle)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("パスワード（端末には保存しません）", text: $loginPassword)
+                    if sync.isSignedIn {
+                        Text("接続先: \(sync.connectedHost)").font(.caption)
+                        Button("ログアウト") {
+                            Task { await sync.signOut() }
+                        }.disabled(sync.isBusy)
+                    } else {
+                        Button("HTTPSサーバーへログイン") {
+                            let password = loginPassword
+                            loginPassword = ""
+                            Task {
+                                await sync.signIn(serverURL: serverURL,
+                                                  handle: loginHandle, password: password)
+                            }
+                        }
+                        .disabled(sync.isBusy || serverURL.isEmpty || loginHandle.isEmpty)
+                    }
+                    Toggle("訪問記録のサーバー送信を許可", isOn: $sync.consentToUpload)
+                    Button("現在の訪問記録を送信し、サーバーから読み戻して照合") {
+                        let snapshot = recorder.events
+                        Task { await sync.uploadAndVerify(events: snapshot) }
+                    }
+                    .disabled(!sync.consentToUpload || !sync.isSignedIn ||
+                              sync.isBusy || recorder.events.isEmpty)
+                    if sync.isBusy { ProgressView("確認中") }
+                    Text(sync.statusMessage).font(.caption)
+                    Text("同期は手動操作のみです。iPhoneのアプリを閉じている間の送信や、Googleドライブへの保存はまだ行いません。")
+                        .font(.caption)
                 }
                 Section("プライバシー") {
                     Text("記録は端末内に保存され、サーバーへ自動送信しません。").font(.caption)
