@@ -31,6 +31,11 @@ enum LocationBackgroundRefresh {
     }
 
     static func schedule() {
+        // User consent is required for even the best-effort background task.
+        guard UserDefaults.standard.bool(forKey: "miya-weekly-local-archive-enabled") else {
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier)
+            return
+        }
         let request = BGAppRefreshTaskRequest(identifier: identifier)
         request.earliestBeginDate = Date().addingTimeInterval(6 * 60 * 60)
         do {
@@ -39,5 +44,9 @@ enum LocationBackgroundRefresh {
             // e.g. already queued, background refresh disabled, or not permitted.
             // Never claim a successful automatic background run from submission.
         }
+    }
+
+    static func cancel() {
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier)
     }
 }
