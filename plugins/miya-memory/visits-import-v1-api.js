@@ -160,6 +160,23 @@ function register(router) {
         }
     });
 
+    router.get('/visits/week-v1', (req, res) => {
+        if (!enabled()) return res.status(404).json({ error: 'Feature not enabled' });
+        const handle = authenticatedUser(req);
+        if (!handle) return res.status(403).json({ error: 'Authenticated account required' });
+        const { completedWeek } = require('./visits-week-v1.js');
+        const start = req.query?.start;
+        if (typeof start !== 'string') return res.status(400).json({ error: 'Invalid period start' });
+        try {
+            const weekly = completedWeek(readStore(handle).events, start);
+            if (!weekly) return res.status(400).json({ error: 'Require seven completed Japan-local days' });
+            res.set?.('Cache-Control', 'no-store');
+            return res.json(weekly);
+        } catch {
+            return res.status(500).json({ error: 'Could not read weekly visits' });
+        }
+    });
+
     router.get('/visits/export-v1', (req, res) => {
         if (!enabled()) return res.status(404).json({ error: 'Feature not enabled' });
         const handle = authenticatedUser(req);
