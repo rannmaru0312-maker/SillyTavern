@@ -25,7 +25,7 @@
 - Never accept user_id from request body as an authority.
 - Keep GPS events separate from confirmed diary entries until user review.
 - Record audit metadata without logging exact coordinates.
-- Prototype provides authenticated JSON export; server deletion endpoint, retention policy, rate limits and automated backup are **not yet implemented**. Client refuses HTTP, disallows redirects and discards credentials on restart.
+- Prototype provides authenticated JSON export **and explicit delete-all** (`POST /visits/delete-v1`, body `confirm: DELETE_MY_VISIT_EVENTS`), including client readback verification. Retention policy, rate limits and automated backup are **not yet implemented**. Client refuses HTTP, disallows redirects and discards credentials on restart.
 - Never claim successful Google Drive backup from successful API upload alone.
 
 ## Seven-day Drive export (not implemented from GPS events)
@@ -52,3 +52,8 @@
 - Any mismatch in readback prevents the app from claiming success; a successful server upload is not a successful Google Drive backup.
 - An event modified after initial upload is rejected with HTTP 409 pending an explicit authenticated edit protocol.
 - The HTTPS destination must be the authentic MIYA server; never enter a third-party URL because place names and timestamp metadata are sensitive.
+
+## Data erasure safeguard
+- Server deletion only works for the account verified by the current session, requires CSRF and exact explicit confirmation text, and deletes only that account's event file under the file lock.
+- iOS UI requires a separate destructive confirmation and checks the server's exported events are empty before reporting deletion success.
+- Device-local records are not automatically deleted by server erasure and must be deleted separately; re-upload needs fresh consent.
