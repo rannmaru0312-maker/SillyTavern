@@ -17,6 +17,10 @@ enum VisitLocalWeekArchive {
     struct Envelope: Codable {
         let sha256: String
         let payload: WeekContent
+        // Exact canonical bytes make validation portable to Node/Google Drive
+        // without relying on JS matching Swift JSON float/string formatting.
+        // Optional so older archives remain readable.
+        let canonicalPayloadBase64: String?
     }
 
     struct Report {
@@ -89,7 +93,14 @@ enum VisitLocalWeekArchive {
                   envelope.payload.events.count <= 5000 else {
                 throw Failure.existingArchiveCorrupted
             }
-            let hash = digest(try encoder.encode(envelope.payload))
+            let independentlyEncoded = try encoder.encode(envelope.payload)
+            if let base64 = envelope.canonicalPayloadBase64 {
+                guard let embedded = Data(base64Encoded: base64),
+                      embedded == independentlyEncoded else {
+                    throw Failure.existingArchiveCorrupted
+                }
+            }
+            let hash = digest(independentlyEncoded)
             let expectedName = "week-\(envelope.payload.periodStart)-\(hash).json"
             guard hash == envelope.sha256, expectedName == name else {
                 throw Failure.existingArchiveCorrupted
@@ -181,7 +192,8 @@ enum VisitLocalWeekArchive {
             )
             let canonical = try encoder.encode(content)
             let hash = digest(canonical)
-            let envelope = Envelope(sha256: hash, payload: content)
+            let envelope = Envelope(sha256: hash, payload: content,
+                                    canonicalPayloadBase64: canonical.base64EncodedString())
             let bytes = try encoder.encode(envelope)
             let file = directory.appendingPathComponent("week-\(periodStart)-\(hash).json")
 
