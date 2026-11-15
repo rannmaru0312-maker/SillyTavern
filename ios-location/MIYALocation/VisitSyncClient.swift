@@ -25,6 +25,10 @@ private struct ImportReply: Decodable {
     let added: Int
     let duplicates: Int
 }
+private struct DeleteReply: Decodable {
+    let success: Bool
+    let deleted: Int
+}
 private struct VisitPayload: Encodable {
     let events: [RemoteVisitEvent]
 }
@@ -204,6 +208,34 @@ private struct RemoteVisitEvent: Codable, Equatable {
             statusMessage = "\(payload.count)件を送信し、サーバーからの読み戻し照合も成功しました。Googleドライブの7日分保存は別途確認が必要です"
         } catch {
             statusMessage = "送信・確認を完了できませんでした（\(checked)/\(payload.count)件まで受信応答）。\(error.localizedDescription)"
+        }
+    }
+
+    func eraseRemoteVisits() async {
+        guard !isBusy else { return }
+        guard isSignedIn, let base = baseURL, let csrfToken else {
+            statusMessage = "サーバーの記録を削除するには本人のログインが必要です"
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let body = try JSONSerialization.data(withJSONObject: ["confirm": "DELETE_MY_VISIT_EVENTS"])
+            let response = try await request(base: base,
+                                             endpoint: "api/plugins/miya-memory/visits/delete-v1",
+                                             method: "POST", body: body, token: csrfToken)
+            let reply = try JSONDecoder().decode(DeleteReply.self, from: response)
+            guard reply.success else { throw APIError(message: "削除完了の応答がありません") }
+            let saved = try await request(base: base,
+                                          endpoint: "api/plugins/miya-memory/visits/export-v1")
+            let verification = try JSONDecoder().decode(ExportReply.self, from: saved)
+            guard verification.version == 1, verification.events.isEmpty else {
+                throw APIError(message: "削除後の読み戻し確認が一致しません")
+            }
+            consentToUpload = false
+            statusMessage = "サーバー側の \(reply.deleted)件を削除・確認しました。端末内の記録は残ります。再送信するには改めて許可が必要です"
+        } catch {
+            statusMessage = "サーバー削除を確認できませんでした: \(error.localizedDescription)"
         }
     }
 
