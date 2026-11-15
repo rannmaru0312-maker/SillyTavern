@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import MIYALocation
 
 final class VisitLocalWeekArchiveTests: XCTestCase {
@@ -149,6 +150,41 @@ final class VisitLocalWeekArchiveTests: XCTestCase {
         let renamed = folder.appendingPathComponent("week-2026-11-08-invalidhash.json")
         try FileManager.default.moveItem(at: source, to: renamed)
         XCTAssertThrowsError(try VisitLocalWeekArchive.verifyExisting(in: folder))
+    }
+
+    func testPortableCanonicalBytesMatchSHA256AndStoredPayload() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let start = utc("2026-11-07T15:00:00Z")
+        let now = utc("2026-11-15T01:00:00Z")
+        let result = try VisitLocalWeekArchive.writeCompleted(
+            events: [exampleEvent()], anchor: start, now: now, directory: folder)
+        let archiveData = try Data(contentsOf: XCTUnwrap(result.lastFile))
+        let envelope = try JSONDecoder().decode(VisitLocalWeekArchive.Envelope.self, from: archiveData)
+        let encoded = try XCTUnwrap(envelope.canonicalPayloadBase64)
+        let canonical = try XCTUnwrap(Data(base64Encoded: encoded))
+        let checksum = SHA256.hash(data: canonical).map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(checksum, envelope.sha256)
+        XCTAssertTrue(String(data: canonical, encoding: .utf8)!.contains("Fictional shop"))
+        XCTAssertNoThrow(try VisitLocalWeekArchive.verifyExisting(in: folder))
+    }
+
+    func testTamperingPortablePayloadBytesStopsFurtherBackupClaims() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let start = utc("2026-11-07T15:00:00Z")
+        let now = utc("2026-11-15T01:00:00Z")
+        let result = try VisitLocalWeekArchive.writeCompleted(
+            events: [exampleEvent()], anchor: start, now: now, directory: folder)
+        let file = try XCTUnwrap(result.lastFile)
+        let archive = try String(contentsOf: file, encoding: .utf8)
+        // Existing SHA-256 is untouched; changing embedded bytes must fail.
+        let edited = archive.replacingOccurrences(of: "canonicalPayloadBase64",
+                                                    with: "differentPayloadField")
+        try edited.write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try VisitLocalWeekArchive.verifyExisting(in: folder))
+        XCTAssertThrowsError(try VisitLocalWeekArchive.verifyCheckpoint(
+            anchor: start, cursor: result.nextPeriodStart, directory: folder))
     }
 
     func testUnfinishedWeekIsNotArchived() throws {
