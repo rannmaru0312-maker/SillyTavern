@@ -91,9 +91,27 @@ class Pipeline(unittest.TestCase):
             runner.run(self.source,[self.day,self.day],ZIP,2026,self.output)
         self.assertFalse(self.output.exists())
         self.assertEqual(self.source.read_bytes(),original)
+        bad_zip=self.p/'bad.zip'
+        bad_zip.write_bytes(b'fake archive cannot pass SHA256')
         with self.assertRaises(ValueError):
-            runner.run(self.source,[self.day],self.p/'missing.zip',2026,self.output)
+            runner.run(self.source,[self.day],bad_zip,2026,self.output)
         self.assertFalse(self.output.exists())
+    def test_missing_binary_imports_gps_and_defers_address(self):
+        res=runner.run(self.source,[self.day],None,2026,self.output)
+        self.assertEqual(res['status'],'updated')
+        self.assertEqual(res['appended'],1)
+        self.assertEqual(res['address_candidates'],0)
+        self.assertEqual(res['address_status'],'deferred_missing_binary')
+        imported=SpreadsheetFile.import_xlsx(Blob.load(str(self.output)))
+        self.assertIsNone(imported.worksheets.get_item('店舗名の修正').get_range('E5').values[0][0])
+        filled=self.p/'filled.xlsx'
+        yr=self.p/'continue'/'生活記録_2026.xlsx'
+        yr.parent.mkdir(parents=True)
+        shutil.copyfile(self.output,yr)
+        back=runner.run(yr,[self.day],ZIP,2026,filled)
+        self.assertEqual(back['appended'],0)
+        self.assertEqual(back['address_candidates'],1)
+        self.assertEqual(back['address_status'],'completed')
     def test_wrong_year_rejected(self):
         with self.assertRaises(ValueError):
             runner.run(self.source,[self.day],ZIP,2027,self.output)
