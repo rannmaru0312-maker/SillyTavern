@@ -46,6 +46,34 @@ class TestDailyIntake(unittest.TestCase):
         w.worksheets.get_item('11月').get_range('H5').values=[[35.99]]
         altered=self.root/'altered.xlsx';SpreadsheetFile.export_xlsx(w).save(str(altered))
         with self.assertRaises(ValueError):mod.import_daily(altered,self.raw,self.root/'should-not.xlsx',2026)
+    def test_synthetic_device_is_ignored(self):
+        day=json.loads(self.raw.read_text(encoding='utf8'))
+        p=dict(self.event['payload']); p['tid']='TEST'
+        canonical=json.dumps(p,separators=(',',':'),ensure_ascii=False)
+        test={'id':hashlib.sha256(canonical.encode()).hexdigest(),
+              'canonical':canonical,'payload':p,'receivedAt':'2026-11-16T01:00:00Z'}
+        day['events'].append(test)
+        self.raw.write_text(json.dumps(day,ensure_ascii=False),encoding='utf8')
+        result=mod.import_daily(self.src,self.raw,self.root/'no-test.xlsx',2026)
+        self.assertEqual(result['appended'],1)
+    def test_unsafe_device_label_and_naive_received_time_are_rejected(self):
+        for change in ('formula','timezone'):
+            day=json.loads(self.raw.read_text(encoding='utf8'))
+            if change=='formula':
+                p=day['events'][0]['payload']; p['tid']='=HYPERLINK("https://invalid", "x")'
+                canonical=json.dumps(p,separators=(',',':'),ensure_ascii=False)
+                day['events'][0]['canonical']=canonical
+                day['events'][0]['id']=hashlib.sha256(canonical.encode()).hexdigest()
+            else:
+                day['events'][0]['receivedAt']='2026-11-16T01:00:00'
+            raw=self.root/f'owntracks_2026-11-16.{change}.json'
+            # parse_day requires canonical filename; use a valid filename in a separate folder.
+            raw=self.root/change/'owntracks_2026-11-16.json'
+            raw.parent.mkdir()
+            raw.write_text(json.dumps(day,ensure_ascii=False),encoding='utf8')
+            with self.assertRaises(ValueError):
+                mod.import_daily(self.src,raw,self.root/f'blocked-{change}.xlsx',2026)
+            self.assertFalse((self.root/f'blocked-{change}.xlsx').exists())
     def test_wrong_year_and_bad_hash(self):
         with self.assertRaises(ValueError):mod.import_daily(self.src,self.raw,self.root/'bad.xlsx',2027)
         d=json.loads(self.raw.read_text());d['events'][0]['canonical']+='x'
