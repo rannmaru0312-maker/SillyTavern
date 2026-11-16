@@ -5,6 +5,8 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - 'owntracks-receiver/geo/offline-rust/**'
+      - 'owntracks-receiver/geo/confirmed-stay-business-candidates.py'
+      - 'owntracks-receiver/geo/test-confirmed-stay-business-candidates.py'
       - '.github/workflows/owntracks-offline-town-check.yml'
 
 permissions:
@@ -50,7 +52,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
       - name: Check annual offline Excel updater Python syntax
-        run: python3 -m py_compile owntracks-receiver/geo/annual-offline-town-update.py owntracks-receiver/geo/import-owntracks-day-into-annual.py owntracks-receiver/geo/run-private-diary-sync.py owntracks-receiver/geo/test-run-private-diary-sync.py owntracks-receiver/geo/test-import-owntracks-day-into-annual.py owntracks-receiver/geo/verify-diary-delta.py owntracks-receiver/geo/test-verify-diary-delta.py owntracks-receiver/geo/write-private-sync-receipt.py owntracks-receiver/geo/test-write-private-sync-receipt.py
+        run: python3 -m py_compile owntracks-receiver/geo/annual-offline-town-update.py owntracks-receiver/geo/import-owntracks-day-into-annual.py owntracks-receiver/geo/run-private-diary-sync.py owntracks-receiver/geo/test-run-private-diary-sync.py owntracks-receiver/geo/test-import-owntracks-day-into-annual.py owntracks-receiver/geo/verify-diary-delta.py owntracks-receiver/geo/test-verify-diary-delta.py owntracks-receiver/geo/write-private-sync-receipt.py owntracks-receiver/geo/test-write-private-sync-receipt.py owntracks-receiver/geo/confirmed-stay-business-candidates.py owntracks-receiver/geo/test-confirmed-stay-business-candidates.py
       - name: Test private sync receipt validation (synthetic data only)
         run: python3 owntracks-receiver/geo/test-write-private-sync-receipt.py
       - name: Confirm no application secrets are present
