@@ -43,6 +43,15 @@ def parse_day(path):
             raise ValueError('invalid canonical SHA')
         if json.loads(canonical)!=payload or not isinstance(payload,dict) or payload.get('_type') not in ('location','transition'):
             raise ValueError('payload mismatch')
+        # Ignore intentionally generated tests but never invent a real visit from them.
+        if (str(payload.get('tid', '')).upper() == 'TEST'
+                or 'SYNTHETIC' in str(payload.get('desc', '')).upper()
+                or item.get('synthetic') is True):
+            continue
+        # Text from a phone must not become a spreadsheet formula or control text.
+        tid=payload.get('tid', '')
+        if not isinstance(tid,str) or len(tid)>32 or re.match(r'^\s*[=+@\-]',tid) or re.search(r'[\x00-\x1f\x7f]',tid):
+            raise ValueError('unsafe device label')
         for field,a,b in [('lat',-90,90),('lon',-180,180)]:
             v=payload.get(field)
             if type(v) not in (int,float) or not (a<=v<=b): raise ValueError('invalid GPS')
@@ -50,14 +59,17 @@ def parse_day(path):
         if acc is not None and (type(acc) not in (int,float) or not 0<=acc<=200000):
             raise ValueError('invalid GPS accuracy')
         tst=payload.get('tst')
-        if not isinstance(tst,int) or tst<946684800:
+        if type(tst) is not int or tst<946684800:
             raise ValueError('invalid observation time')
         t=datetime.fromtimestamp(tst,tz=timezone.utc).astimezone(JST)
         if t.date().isoformat()!=obj['date']:
             raise ValueError('observation local date mismatch')
         if payload['_type']=='transition' and payload.get('event') not in ('enter','leave'):
             raise ValueError('invalid transition')
-        recv=datetime.fromisoformat(item['receivedAt'].replace('Z','+00:00')).astimezone(JST)
+        raw_recv=item.get('receivedAt')
+        if not isinstance(raw_recv,str) or not raw_recv.endswith('Z'):
+            raise ValueError('invalid receivedAt timezone')
+        recv=datetime.fromisoformat(raw_recv.replace('Z','+00:00')).astimezone(JST)
         if recv.year<2020 or recv.year>2100:
             raise ValueError('invalid receivedAt')
         out.append({'id':eid,'p':payload,'observed':t,'received':recv})
