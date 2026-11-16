@@ -25,5 +25,22 @@ jobs:
         run: |
           printf '%s' '{"lat":35.6812,"lon":139.7671}' | \
             cargo run --quiet --release --manifest-path owntracks-receiver/geo/offline-rust/Cargo.toml
+      - name: Test Node adapter without external network
+        run: node --test owntracks-receiver/geo/offline-town-provider.test.mjs
+      - name: Connect Node adapter to the compiled offline binary using public Tokyo Station only
+        run: |
+          node --input-type=module -e '
+          import {resolve} from "node:path";
+          import {strict as assert} from "node:assert";
+          import {suggestTownOffline} from "./owntracks-receiver/geo/offline-town-provider.mjs";
+          const result = await suggestTownOffline(
+            {eventId:"publictokyo001",lat:35.6812,lon:139.7671,accuracyMeters:5},
+            {enabled:true,approvedPrivateRuntime:true,
+              binaryPath:resolve("owntracks-receiver/geo/offline-rust/target/release/miya-offline-japan-town-geocoder")});
+          assert.equal(result.status,"automatic_candidate_unverified");
+          assert.ok(result.addressCandidate.startsWith("東京都千代田区丸の内"));
+          assert.equal(result.facilityCandidate,"");
+          console.log("Node-to-private-binary lookup succeeded on fixed public Tokyo Station only");
+          '
       - name: Confirm no application secrets are present
         run: echo 'Only fixed public railway stations are used in this evaluation; no live user GPS files are read.'
