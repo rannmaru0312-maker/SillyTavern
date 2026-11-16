@@ -45,7 +45,10 @@ export function createGsiOverpassProvider({
   }
   async function request(url,init={}) {
     await charge();
-    const res=await fetcher(url,{redirect:'error',signal:AbortSignal.timeout(8000),...init});
+    // Identification required by public OSM providers. No account or device ID.
+    const projectUserAgent='MIYA-GPS-Prototype/0.1 (+https://github.com/rannmaru0312-maker/SillyTavern)';
+    const headers={...init.headers,'User-Agent':projectUserAgent,'Accept':'application/json'};
+    const res=await fetcher(url,{redirect:'error',signal:AbortSignal.timeout(8000),...init,headers});
     if (!res || !res.ok) throw Error('provider_unavailable');
     const contentType=res.headers?.get?.('content-type')||'';
     if (contentType && !/application\/json|text\/json/i.test(contentType)) throw Error('unexpected_response_type');
