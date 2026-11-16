@@ -83,7 +83,8 @@ def apply_updates(source, plan, output):
         if col == 'O':
             assert isinstance(actual,(int,float)) and abs(actual-expected)<1/86400, "Timestamp mismatch"
         else:
-            assert actual == expected, "Write/readback mismatch"
+            # Empty Excel cells may be normalized from "" to None on roundtrip.
+            assert actual == expected or (expected == "" and actual is None), "Write/readback mismatch"
     for row, protected in old_f_g_h.items():
         snapshot = (checked.get_range(f"F{row}").values[0][0],
                     checked.get_range(f"G{row}").formulas[0][0],
