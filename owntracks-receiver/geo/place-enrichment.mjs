@@ -69,20 +69,22 @@ export async function suggestPlace(point, {
       typeof provider.nearbyFacility !== 'function' || !clean(provider.name)) {
     return baseline;
   }
-  try {
-    // Provider calls must have explicit quotas/cache/privacy policies validated
-    // by the caller. NO default endpoint is silently used by this module.
-    const address = await provider.reverseAddress({lat: point.lat, lon: point.lon});
-    const place = await provider.nearbyFacility({lat: point.lat, lon: point.lon,
-      accuracyMeters: point.accuracyMeters});
-    const addressCandidate = clean(address?.address);
-    const facilityCandidate = clean(place?.name);
-    return {...baseline, status: addressCandidate || facilityCandidate ? ENRICHMENT_STATUS.CANDIDATE : ENRICHMENT_STATUS.NO_MATCH,
-      addressCandidate, facilityCandidate, providerName: clean(provider.name, 100),
-      checkedAt: new Date().toISOString()};
-  } catch {
+  // Preserve partial results when the address or POI provider is unavailable.
+  // Nearby facilities never prove an actual visit.
+  let address, place, failed = 0;
+  try { address = await provider.reverseAddress({lat: point.lat, lon: point.lon}); }
+  catch { failed++; }
+  try { place = await provider.nearbyFacility({lat: point.lat, lon: point.lon,
+    accuracyMeters: point.accuracyMeters}); }
+  catch { failed++; }
+  const addressCandidate = clean(address?.address);
+  const facilityCandidate = clean(place?.name);
+  if (!addressCandidate && !facilityCandidate && failed > 0) {
     return {...baseline, status: ENRICHMENT_STATUS.LOOKUP_FAILED};
   }
+  return {...baseline, status: addressCandidate || facilityCandidate ? ENRICHMENT_STATUS.CANDIDATE : ENRICHMENT_STATUS.NO_MATCH,
+    addressCandidate, facilityCandidate, providerName: clean(provider.name, 100),
+    checkedAt: new Date().toISOString()};
 }
 
 /** Manual correction always wins; do not alter immutable source record. */
