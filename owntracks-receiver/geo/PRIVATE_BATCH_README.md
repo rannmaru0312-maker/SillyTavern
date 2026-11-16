@@ -5,7 +5,7 @@
 ## 入出力
 
 - 入力：Google Drive内の本人専用 `生活記録_YYYY.xlsx` の実バイト、 `OwnTracks_受信記録/owntracks_YYYY-MM-DD.json` の実バイト、 SHA256を固定したオフライン町丁目検索バイナリZIP。
-- コマンド：`python run-private-diary-sync.py --source 生活記録_2026.xlsx --daily-json owntracks_2026-11-16.json --binary-zip miya-offline-town-geocoder-linux-20261116.zip --year 2026 --output 年別更新候補.xlsx`。日別JSONは `--daily-json` を繰り返して指定できる。
+- コマンド：`python run-private-diary-sync.py --source 生活記録_2026.xlsx --daily-json owntracks_2026-11-16.json --binary-zip miya-offline-town-geocoder-linux-20261116.zip --year 2026 --output 年別更新候補.xlsx`。日別JSONは `--daily-json` を繰り返して指定できる。住所ZIPが取得できない場合はGPSだけ安全に追加し、`address_status=deferred_missing_binary` として住所候補を次回に延期する。
 - 出力：`status=updated` の場合のみ新しい更新候補Excel。`status=unchanged` なら生成しない。エラーでは元のExcelに触れない。
 - 処理：各日別JSONを **イベントIDとJSON本文のSHA-256、JST日付で検証** → 新規イベントだけを年/月別シートと修正台帳へ追加 → 精度条件を満たす住所空欄レコードに限り町丁目候補をオフライン算出 → 保存コピーのID・修正欄・式・原本の維持を照合。
 - 新しい年は対応する `生活記録_YYYY.xlsx` を**別途本人専用で用意**してから処理する。年をまたいだ日別データを誤年のExcelに保存しない。
