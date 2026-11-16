@@ -46,3 +46,16 @@ test('rejects false shop name from town-only lookup',async()=>{
     status:'town_candidate_unverified',addressCandidate:'東京都千代田区',
     facilityCandidate:'Tokyo Station',providerName:'synthetic'})})).status,'lookup_failed');
 });
+test('offline address candidate flows into annual Excel plan without replacing manual shop name',async()=>{
+  const {planCandidateUpdates}=await import('./plan-excel-candidates.mjs');
+  const suggestion=await suggestTownOffline(p,opts);
+  const plan=planCandidateUpdates({year:2026,records:[{
+    eventId:p.eventId,monthSheet:'11月',year:2026,rowNumber:9,
+    existingBusinessCandidate:'',existingAddressCandidate:'',existingProvider:'',
+    existingCheckedAt:'',manualCorrection:'本人修正の店舗名'
+  }],suggestions:[suggestion]});
+  assert.equal(plan.planned.length,1);
+  assert.equal(plan.planned[0].cells.D,'');
+  assert.equal(plan.planned[0].cells.E,'東京都千代田区丸の内一丁目');
+  assert.equal(plan.planned[0].manualCorrectionPreserved,true);
+});
