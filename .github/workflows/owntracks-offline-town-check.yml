@@ -42,5 +42,12 @@ jobs:
           assert.equal(result.facilityCandidate,"");
           console.log("Node-to-private-binary lookup succeeded on fixed public Tokyo Station only");
           '
+      - name: Save public-data-only geocoder executable for private runtime evaluation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: miya-offline-town-geocoder-linux
+          path: owntracks-receiver/geo/offline-rust/target/release/miya-offline-japan-town-geocoder
+          retention-days: 1
+          if-no-files-found: error
       - name: Confirm no application secrets are present
         run: echo 'Only fixed public railway stations are used in this evaluation; no live user GPS files are read.'
