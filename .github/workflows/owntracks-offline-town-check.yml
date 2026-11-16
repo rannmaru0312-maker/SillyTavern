@@ -50,6 +50,6 @@ jobs:
           retention-days: 1
           if-no-files-found: error
       - name: Check annual offline Excel updater Python syntax
-        run: python3 -m py_compile owntracks-receiver/geo/annual-offline-town-update.py owntracks-receiver/geo/import-owntracks-day-into-annual.py
+        run: python3 -m py_compile owntracks-receiver/geo/annual-offline-town-update.py owntracks-receiver/geo/import-owntracks-day-into-annual.py owntracks-receiver/geo/run-private-diary-sync.py owntracks-receiver/geo/test-run-private-diary-sync.py owntracks-receiver/geo/test-import-owntracks-day-into-annual.py
       - name: Confirm no application secrets are present
         run: echo 'Only fixed public railway stations are used in this evaluation; no live user GPS files are read.'
