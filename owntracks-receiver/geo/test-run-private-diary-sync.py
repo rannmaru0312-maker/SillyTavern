@@ -112,6 +112,34 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(back['appended'],0)
         self.assertEqual(back['address_candidates'],1)
         self.assertEqual(back['address_status'],'completed')
+    def test_even_when_no_missing_address_bad_existing_archive_is_rejected(self):
+        # A tampered artifact must be rejected even when the workbook has
+        # already received all of its address candidates.
+        runner.run(self.source,[self.day],ZIP,2026,self.output)
+        newroot=self.p/'current'
+        newroot.mkdir()
+        current=newroot/'生活記録_2026.xlsx'
+        shutil.copyfile(self.output,current)
+        broken=self.p/'broken.zip'
+        broken.write_bytes(b'incorrect content')
+        with self.assertRaises(ValueError):
+            runner.run(current,[self.day],broken,2026,self.p/'unexpected-output.xlsx')
+        self.assertFalse((self.p/'unexpected-output.xlsx').exists())
+
+    def test_previous_manual_name_survives_repeat_no_change(self):
+        runner.run(self.source,[self.day],ZIP,2026,self.output)
+        imported=SpreadsheetFile.import_xlsx(Blob.load(str(self.output)))
+        imported.worksheets.get_item('店舗名の修正').get_range('F5').values=[['架空の本人確認済み施設']]
+        current=self.p/'manual'/'生活記録_2026.xlsx'
+        current.parent.mkdir()
+        SpreadsheetFile.export_xlsx(imported).save(str(current))
+        ret=runner.run(current,[self.day],ZIP,2026,self.p/'not-generated.xlsx')
+        self.assertEqual(ret['status'],'unchanged')
+        self.assertFalse((self.p/'not-generated.xlsx').exists())
+        checked=SpreadsheetFile.import_xlsx(Blob.load(str(current)))
+        self.assertEqual(checked.worksheets.get_item('店舗名の修正').get_range('F5').values[0][0],
+                         '架空の本人確認済み施設')
+
     def test_wrong_year_rejected(self):
         with self.assertRaises(ValueError):
             runner.run(self.source,[self.day],ZIP,2027,self.output)
