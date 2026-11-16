@@ -48,6 +48,10 @@ def run(source: Path, daily_files: list[Path], binary_zip: Path, year: int, outp
     # The updater validates both fixed SHA256 digests before executing the binary.
     intake = _load('owntracks_daily_intake', 'import-owntracks-day-into-annual.py')
     town = _load('owntracks_private_town', 'annual-offline-town-update.py')
+    integrity = _load('owntracks_diary_integrity', 'verify-diary-delta.py')
+    # Detect a changed executable archive even when every address is already filled.
+    if address_available and _sha(binary_zip) != town.APPROVED_ARCHIVE_SHA256:
+        raise ValueError('offline archive checksum mismatch')
 
     inputs = []
     seen_days = set()
@@ -100,6 +104,13 @@ def run(source: Path, daily_files: list[Path], binary_zip: Path, year: int, outp
                 'remaining': town_result.get('remaining', 0),
                 'output_created': False, 'source_sha256': initial_sha,
             }
+        # Verify the entire historical workbook, formula links, manual edits and
+        # allowed per-month counters before any candidate is committed.
+        report = integrity.verify(source, latest, year)
+        if report['new_gps'] != appended:
+            raise ValueError('unverified GPS row count')
+        if report['new_address_candidates_on_existing_rows'] > town_result['updated_rows']:
+            raise ValueError('unverified address changes')
         # Do not leave a misleading output from a previous execution.
         if output.exists():
             raise ValueError('destination already exists')
