@@ -1,0 +1,29 @@
+name: OwnTracks offline Japan town geocoder evaluation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'owntracks-receiver/geo/offline-rust/**'
+      - '.github/workflows/owntracks-offline-town-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  public-landmarks-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Check Rust compiler version
+        run: rustc --version && cargo --version
+      - name: Build and test offline town lookup with public stations only
+        run: cargo test --manifest-path owntracks-receiver/geo/offline-rust/Cargo.toml --release
+      - name: Exercise offline CLI on one public station
+        run: |
+          printf '%s' '{"lat":35.6812,"lon":139.7671}' | \
+            cargo run --quiet --release --manifest-path owntracks-receiver/geo/offline-rust/Cargo.toml
+      - name: Confirm no application secrets are present
+        run: echo 'Only fixed public railway stations are used in this evaluation; no live user GPS files are read.'
