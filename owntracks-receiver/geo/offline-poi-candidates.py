@@ -95,6 +95,46 @@ def review_shortlist(bins,lat,lon,accuracy,*,max_accuracy=12,search_radius=15,am
     return {'label':label,'count':len(ranked),'nearest':round(ranked[0][1][0]),
             'osm_ids':[entry['osm_id'] for _,(_,entry) in ranked[:2]]}
 
+def sync_visible_business_candidates(wb):
+    """Directly link user-visible D to private correction F/D; no stale INDEX cache.
+
+    Only replace known, generated display formulas. Unknown/user-authored formulas
+    are never overwritten. The original monthly A:T storage remains unchanged.
+    """
+    import json
+    views=set()
+    for raw in wb.inspect({'kind':'sheet','include':'id,name'}).ndjson.splitlines():
+        try:views.add(json.loads(raw).get('name'))
+        except ValueError:pass
+    correction=wb.worksheets.get_item('店舗名の修正')
+    changes={}
+    for correction_row, rec in enumerate(correction.get_range('A5:Q500').values,5):
+        if rec[9]!='OwnTracks GPS' or not isinstance(rec[3],str) or not rec[3].strip():continue
+        eid, month, row=rec[8],rec[10],rec[11]
+        if not isinstance(eid,str) or not SHA.fullmatch(eid) or not isinstance(month,str) or type(row)!=int or not 5<=row<=500:
+            raise ValueError('invalid candidate view linkage')
+        view_name=month+'_見やすい'
+        if view_name not in views:continue
+        monthly=wb.worksheets.get_item(month)
+        if monthly.get_range(f'K{row}').values[0][0]!=eid:
+            raise ValueError('candidate view ID mismatch')
+        view=wb.worksheets.get_item(view_name)
+        target=view.get_range(f'D{row}')
+        old_formula=target.formulas[0][0]
+        if not isinstance(old_formula,str) or not old_formula.startswith('=IF('):
+            # No formulas / a user-custom literal: do not overwrite.
+            continue
+        # Generated display cells link to the month R or previously linked F/D.
+        if f"'{month}'!R{row}" not in old_formula and f"'店舗名の修正'!F{correction_row}" not in old_formula:
+            continue
+        expected=(f'=IF(\'店舗名の修正\'!F{correction_row}<>"",\'店舗名の修正\'!F{correction_row},'
+                  f'IF(\'店舗名の修正\'!D{correction_row}<>"",\'店舗名の修正\'!D{correction_row},'
+                  f"'{month}'!E{row}))")
+        if old_formula==expected:continue
+        target.formulas=[[expected]]
+        changes[(view_name,row)]={'from':old_formula,'to':expected}
+    return changes
+
 def snapshot(wb):
     # Read only original fixed-schema sheets, not new display tabs whose cached values may recompute.
     out={}
@@ -105,6 +145,31 @@ def snapshot(wb):
         rng=wb.worksheets.get_item(name).get_range(range_)
         out[name]=(rng.values,rng.formulas)
     return out
+
+def snapshot_views(wb):
+    result={}
+    for month in ('10月','11月','12月'):
+        try:
+            view=wb.worksheets.get_item(month+'_見やすい').get_range('A1:J250')
+        except Exception:
+            continue
+        result[month+'_見やすい']=(view.values,view.formulas)
+    return result
+
+def verify_views(before,after,changes):
+    if set(before)!=set(after):raise ValueError('visible sheet structure changed')
+    for name,(old_values,old_formulas) in before.items():
+        new_values,new_formulas=after[name]
+        for ri,(a,b,af,bf) in enumerate(zip(old_values,new_values,old_formulas,new_formulas),1):
+            for ci,(av,bv,fv,gv) in enumerate(zip(a,b,af,bf),1):
+                target=changes.get((name,ri)) if ci==4 else None
+                if target:
+                    if fv!=target['from'] or gv!=target['to']:
+                        raise ValueError('visible POI formula changed unexpectedly')
+                elif fv!=gv:
+                    raise ValueError('other visible formula changed')
+                # Cached values might recalculate; formulas above and original month
+                # data integrity are authoritative.
 
 def verify_delta(before,after,updates):
     for name,(values,formulas) in before.items():
@@ -138,7 +203,8 @@ def run(source:Path,catalog:Path,output:Path,*,expected_catalog_sha256=None,limi
     wb=SpreadsheetFile.import_xlsx(Blob.load(str(source)))
     sheet=wb.worksheets.get_item('店舗名の修正')
     if sheet.get_range('D4').values[0][0]!='自動店舗候補' or sheet.get_range('F4').values[0][0]!='店舗名（本人修正）' or sheet.get_range('I4').values[0][0]!='イベントID' or sheet.get_range('P4:Q4').values[0]!=['店舗候補の根拠','候補判定日時']:raise ValueError('schema mismatch')
-    before=snapshot(wb); updates={}; held=0; scanned=0; review_added=0
+    before=snapshot(wb); old_views=snapshot_views(wb)
+    updates={}; held=0; scanned=0; review_added=0
     for rown,row in enumerate(sheet.get_range('A5:Q500').values,5):
         if len(updates)>=limit:break
         (day,clock,old_name,poi,old_address,manual,_,_,eid,sourcekind,month,month_row,_,_,_,proof,checked)=row
@@ -166,17 +232,20 @@ def run(source:Path,catalog:Path,output:Path,*,expected_catalog_sha256=None,limi
             continue
         item,dist=candidate
         updates[rown]={'name':item['name'],'provenance':f'OSM {item["osm_id"]} / {item["category"]} / 約{round(dist)}m・近接未確認、入店未確定（ODbL）','at':date_serial,'month':month,'month_row':month_row}
-    if not updates:return {'status':'unchanged','gps_scanned':scanned,'candidate_count':0,'ambiguous_held':held,'public_pois_loaded':info['count'],'output_created':False}
     for rown,u in updates.items():
         sheet.get_range(f'D{rown}').values=[[u['name']]]
         sheet.get_range(f'P{rown}').values=[[u['provenance']]]
         sheet.get_range(f'Q{rown}').values=[[u['at']]]
         sheet.get_range(f'Q{rown}').set_number_format('yyyy/mm/dd hh:mm')
+    view_changes=sync_visible_business_candidates(wb)
+    if not updates and not view_changes:
+        return {'status':'unchanged','gps_scanned':scanned,'candidate_count':0,'ambiguous_held':held,'visible_repaired':0,'output_created':False}
     if source_digest!=hashlib.sha256(source.read_bytes()).hexdigest():raise ValueError('source changed')
     SpreadsheetFile.export_xlsx(wb).save(str(output))
     check=SpreadsheetFile.import_xlsx(Blob.load(str(output)))
     verify_delta(before,snapshot(check),updates)
-    return {'status':'updated','gps_scanned':scanned,'candidate_count':len(updates),'review_shortlists':review_added,'ambiguous_held':held,'public_pois_loaded':info['count'],'output_created':True,'source_sha256':source_digest,'output_sha256':hashlib.sha256(output.read_bytes()).hexdigest()}
+    verify_views(old_views,snapshot_views(check),view_changes)
+    return {'status':'updated','gps_scanned':scanned,'candidate_count':len(updates),'review_shortlists':review_added,'visible_repaired':len(view_changes),'ambiguous_held':held,'public_pois_loaded':info['count'],'output_created':True,'source_sha256':source_digest,'output_sha256':hashlib.sha256(output.read_bytes()).hexdigest()}
 
 if __name__=='__main__':
     a=argparse.ArgumentParser();a.add_argument('--source',type=Path,required=True);a.add_argument('--catalog',type=Path,required=True);a.add_argument('--output',type=Path,required=True);a.add_argument('--catalog-sha256');a.add_argument('--limit',type=int,default=250);a.add_argument('--allow-review-shortlists',action='store_true')
