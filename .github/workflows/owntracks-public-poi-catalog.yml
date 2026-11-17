@@ -5,8 +5,6 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - 'owntracks-receiver/geo/build-public-poi-catalog.py'
-      - 'owntracks-receiver/geo/offline-poi-candidates.py'
-      - 'owntracks-receiver/geo/test-offline-poi-candidates.py'
       - '.github/workflows/owntracks-public-poi-catalog.yml'
 
 permissions:
