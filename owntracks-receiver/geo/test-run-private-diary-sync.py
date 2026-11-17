@@ -1,0 +1,145 @@
+"""Synthetic GPS coordinates only. Never fetch or transmit real personal data."""
+import hashlib
+import importlib.machinery
+import json
+import shutil
+import tempfile
+import unittest
+from datetime import datetime, timezone
+from pathlib import Path
+from artifact_tool import Blob, Workbook, SpreadsheetFile
+
+D = Path(__file__).resolve().parent
+runner = importlib.machinery.SourceFileLoader('private_pipeline', str(D / 'run-private-diary-sync.py')).load_module()
+ZIP = Path('/mnt/data/miya-offline-town-geocoder-linux-20261116.zip')
+
+class Pipeline(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='miya-test-public-')
+        self.p = Path(self.temp.name)
+        self.year = 2026
+        self.source = self.p / '生活記録_2026.xlsx'
+        self.day = self.p / 'owntracks_2026-11-16.json'
+        self.output = self.p / 'out.xlsx'
+        b = Workbook.create()
+        b.worksheets.add('使い方').get_range('A26:D26').values = [['11月',0,0,0]]
+        c = b.worksheets.add('店舗名の修正')
+        b.worksheets.add('重複候補・保留').get_range('A1').values=[['保留欄']]
+        b.worksheets.add('出典・照合').get_range('A1').values=[['出典欄']]
+        c.get_range('A4:O4').values = [[
+            '日付','観測時刻','元の場所名','自動店舗候補','自動住所候補',
+            '店舗名（本人修正）','表示する名前','確認状態','イベントID','出典',
+            '月別シート','元行','地図','候補出典','検索日時']]
+        c.get_range('P4:Q4').values = [['店舗候補の根拠','候補判定日時']]
+        for n in range(1,13):
+            sh=b.worksheets.add(f'{n}月')
+            sh.get_range('K4').values=[['統合用ID／イベントID']]
+            sh.get_range('A3:F3').values=[['記録合計',0,'生活記録',0,'GPS・Timeline',0]]
+        SpreadsheetFile.export_xlsx(b).save(str(self.source))
+        event = {'_type':'location','tst':1794790491,'lat':35.6812,'lon':139.7671,'acc':5,'tid':'32'}
+        canon=json.dumps(event,ensure_ascii=False,separators=(',',':'))
+        self.eid=hashlib.sha256(canon.encode()).hexdigest()
+        self.day.write_text(json.dumps({
+            'version':1,'source':'owntracks','timezone':'Asia/Tokyo',
+            'coverageVerified':False,'date':'2026-11-16',
+            'events':[{'id':self.eid,'canonical':canon,'payload':event,
+                       'receivedAt':'2026-11-16T01:00:00Z'}]},ensure_ascii=False),encoding='utf-8')
+    def tearDown(self):
+        self.temp.cleanup()
+    def test_one_execution_and_idempotence(self):
+        original=self.source.read_bytes()
+        res=runner.run(self.source,[self.day],ZIP,2026,self.output)
+        self.assertEqual((res['appended'],res['address_candidates']),(1,1))
+        self.assertEqual(self.source.read_bytes(),original)
+        w=SpreadsheetFile.import_xlsx(Blob.load(str(self.output)))
+        c=w.worksheets.get_item('店舗名の修正')
+        self.assertEqual(c.get_range('I5').values[0][0],self.eid)
+        self.assertIn('東京都千代田区丸の内',c.get_range('E5').values[0][0])
+        self.assertIsNone(c.get_range('F5').values[0][0])
+        self.assertEqual(w.worksheets.get_item('11月').get_range('K5').values[0][0],self.eid)
+        no=self.p/'should-not-create.xlsx'
+        rerun_source=self.p/'rerun'/'生活記録_2026.xlsx'
+        rerun_source.parent.mkdir(parents=True)
+        shutil.copyfile(self.output,rerun_source)
+        res2=runner.run(rerun_source,[self.day],ZIP,2026,no)
+        self.assertEqual(res2['status'],'unchanged')
+        self.assertFalse(no.exists())
+    def test_two_day_batch_and_atomic_abort_on_later_corruption(self):
+        next_day=self.p/'owntracks_2026-11-17.json'
+        event={'_type':'location','tst':int(datetime(2026,11,17,1,tzinfo=timezone.utc).timestamp()),
+               'lat':34.7024,'lon':135.4959,'acc':5,'tid':'32'}
+        canon=json.dumps(event,ensure_ascii=False,separators=(',',':'))
+        eid=hashlib.sha256(canon.encode()).hexdigest()
+        body={'version':1,'source':'owntracks','timezone':'Asia/Tokyo',
+              'coverageVerified':False,'date':'2026-11-17',
+              'events':[{'id':eid,'canonical':canon,'payload':event,
+                         'receivedAt':'2026-11-17T01:01:00Z'}]}
+        next_day.write_text(json.dumps(body,ensure_ascii=False),encoding='utf-8')
+        original=self.source.read_bytes()
+        result=runner.run(self.source,[next_day,self.day],ZIP,2026,self.output)
+        self.assertEqual((result['appended'],result['address_candidates']),(2,2))
+        self.assertEqual(result['processed_days'],2)
+        self.assertEqual(self.source.read_bytes(),original)
+        wb=SpreadsheetFile.import_xlsx(Blob.load(str(self.output)))
+        self.assertEqual(len([r for r in wb.worksheets.get_item('店舗名の修正').get_range('I5:I6').values if r[0]]),2)
+        # Corrupt the second day; no partial output may escape even though day 1 is valid.
+        next_day.write_text(next_day.read_text(encoding='utf-8').replace('34.7024','34.7999'),encoding='utf-8')
+        with self.assertRaises(ValueError):
+            runner.run(self.source,[self.day,next_day],ZIP,2026,self.p/'should-not-create.xlsx')
+        self.assertFalse((self.p/'should-not-create.xlsx').exists())
+        self.assertEqual(self.source.read_bytes(),original)
+    def test_invalid_inputs_leave_source_intact(self):
+        original=self.source.read_bytes()
+        with self.assertRaises(ValueError):
+            runner.run(self.source,[self.day,self.day],ZIP,2026,self.output)
+        self.assertFalse(self.output.exists())
+        self.assertEqual(self.source.read_bytes(),original)
+        bad_zip=self.p/'bad.zip'
+        bad_zip.write_bytes(b'fake archive cannot pass SHA256')
+        with self.assertRaises(ValueError):
+            runner.run(self.source,[self.day],bad_zip,2026,self.output)
+        self.assertFalse(self.output.exists())
+    def test_missing_binary_imports_gps_and_defers_address(self):
+        res=runner.run(self.source,[self.day],None,2026,self.output)
+        self.assertEqual(res['status'],'updated')
+        self.assertEqual(res['appended'],1)
+        self.assertEqual(res['address_candidates'],0)
+        self.assertEqual(res['address_status'],'deferred_missing_binary')
+        imported=SpreadsheetFile.import_xlsx(Blob.load(str(self.output)))
+        self.assertIsNone(imported.worksheets.get_item('店舗名の修正').get_range('E5').values[0][0])
+        filled=self.p/'filled.xlsx'
+        yr=self.p/'continue'/'生活記録_2026.xlsx'
+        yr.parent.mkdir(parents=True)
+        shutil.copyfile(self.output,yr)
+        back=runner.run(yr,[self.day],ZIP,2026,filled)
+        self.assertEqual(back['appended'],0)
+        self.assertEqual(back['address_candidates'],1)
+        self.assertEqual(back['address_status'],'completed')
+    def test_wrong_year_rejected(self):
+        with self.assertRaises(ValueError):
+            runner.run(self.source,[self.day],ZIP,2027,self.output)
+        self.assertFalse(self.output.exists())
+
+    def test_core_pipeline_with_optional_offline_poi(self):
+        import importlib.machinery
+        b = importlib.machinery.SourceFileLoader('public_atlas', str(D/'build-public-poi-catalog.py')).load_module()
+        public = self.p/'public-geojsonseq.txt'
+        catalog = self.p/'public-poi.ndjson'
+        public.write_text('\x1e'+json.dumps({'type':'Feature','geometry':{'type':'Point','coordinates':[139.7671,35.6812]},'properties':{'@type':'node','@id':777,'name':'架空駅前カフェ','amenity':'cafe'}},ensure_ascii=False)+'\n',encoding='utf-8')
+        catalog_result=b.create(public,catalog)
+        r=runner.run(self.source,[self.day],None,2026,self.output,poi_catalog=catalog,poi_catalog_sha256=catalog_result['sha256'])
+        self.assertEqual(r['appended'],1)
+        self.assertEqual(r['poi_candidates'],1)
+        self.assertEqual(r['poi_status'],'updated')
+        wb=SpreadsheetFile.import_xlsx(Blob.load(str(self.output)))
+        c=wb.worksheets.get_item('店舗名の修正')
+        self.assertEqual(c.get_range('D5').values[0][0],'架空駅前カフェ')
+        self.assertIsNone(c.get_range('F5').values[0][0])
+        self.assertIsNone(c.get_range('E5').values[0][0])
+        next_source=self.p/'next'/'生活記録_2026.xlsx';next_source.parent.mkdir()
+        shutil.copyfile(self.output,next_source)
+        again=runner.run(next_source,[self.day],None,2026,self.p/'should-not-create.xlsx',poi_catalog=catalog)
+        self.assertEqual((again['status'],again['poi_candidates']),('unchanged',0))
+
+if __name__=='__main__':
+    unittest.main(verbosity=2)

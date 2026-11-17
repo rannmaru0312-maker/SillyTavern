@@ -1,0 +1,38 @@
+# MIYA & KOHARU — Offline public OSM POI catalog (2026-11-17)
+
+**Status:** Code and synthetic 9-case tests passed; private actual annual workbook schema tested with an unrelated public synthetic POI (0 changes). **Not yet production-deployed.** Real Kansai OSM catalog creation must be confirmed from CI artifact before testing actual names, and the scheduled job must be separately wired and verified.
+
+## Public dataset acquisition: no private GPS in GitHub
+
+`.github/workflows/owntracks-public-poi-catalog.yml` downloads fixed **entire Kansai** Geofabrik OSM extract to GitHub Actions and extracts named POI **nodes only**. Source [Geofabrik Kansai](https://download.geofabrik.de/asia/japan/kansai.html), OSM data © OpenStreetMap contributors, license ODbL-1.0, see https://www.openstreetmap.org/copyright. No personal GPS or annual Excel leaves the private environment. The CI generated artifact is public reference-only; do **not** publish joined results or candidate matches.
+
+Only named shop/amenity/tourism nodes are included initially. OSM ways (buildings mapped as polygons) and restaurants absent from OSM are **not covered**. No claim of comprehensive store lookup. Catalog is not generated if public download/parse fails. Artifact retention 2 days (fetch into *private*, non-shared Drive after validating source and SHA256). Do not auto-download to a public repository or use live per-point Overpass requests.
+
+## Private processing
+
+1. Obtain the `kansai-public-poi.ndjson` public artifact. Validate the output first line `schema:1`, `kind:public_osm_named_poi_nodes`, source URL, `count`, ODbL attribution and SHA256. Store as **nonshared**, with update date/hash (never store user GPS in artifact or GitHub).
+2. In a trusted private environment with `artifact_tool`, download the **latest** `生活記録_YYYY.xlsx` and the catalog bytes. Run `offline-poi-candidates.py --source 生活記録_YYYY.xlsx --catalog kansai-public-poi.ndjson --catalog-sha256 SHA256 --output 生活記録_YYYY_候補.xlsx`.
+3. The script processes only GPS observations whose original month record E column is `未登録`, GPS accuracy ≤12m, one uniquely named POI within 15m and **no other named POI within 35m plus accuracy**. This is a *nearby candidate, not a verified visit*. Optional `--allow-review-shortlists` instead shows **multiple competing names prefixed `周辺候補（要確認）：`**, always unverified, with OSM references, never as a settled store. The user decides by editing F. Manual correction F and existing candidate D and existing P/Q provenance are never overwritten. Exact coordinates are never logged, emitted, or sent outside private process. All existing month data and formulas are compared before output is considered valid.
+4. If updated, pre-save verify original Drive file version, parent, sharing, full byte SHA256, create a nonshared backup. Replace same Drive file ID only; read back and compare the byte hash and key cells. If `unchanged` or `no_public_poi_data`, do not write. This script deliberately does **not** call Google Drive or change the production app.
+5. The weekly/monthly visible tabs `11月_見やすい` etc. derive location from existing monthly R and S; candidate D is reflected via existing correction formulas. Do not overwrite manual edits or change source linkage.
+
+### Limitations
+
+- If no OSM file can be downloaded, **no new store names can be produced**. Do not create invented names.
+- OSM POI nodes only: mapping coverage is partial. Nearby is not an arrival/departure confirmation. Missing, inaccurate, or ambiguous locations must remain blank.
+- Sensitive site names/locations are never sent to public APIs; offline candidate generation still requires careful review before using names for any private household, workplace or care-client location.
+- Scheduled updates not proven, and no payments or production Render changes authorized.
+
+## Local verification
+
+```sh
+python3 test-offline-poi-candidates.py
+```
+
+## 2026-11-17 actual private readback verification
+
+- Public Kansai node POI catalog built successfully in GitHub Actions run 44078877943: 141,260 named POI nodes; SHA256 `ee4b28c94ab7c72693ca98d9df680e6227da8c71227de1eae25f3599ba537a04`; privately stored as Drive ID `17dCSys_xRvu-MXFMllvZr0OHLhY5YF9Z`.
+- With actual private GPS, 91 events were eligible for scanning and 6 records had **multiple nearby public storefront names**, no single reliable winner. Stored as `周辺候補（要確認）：...` in the private annual workbook; manual F remains authoritative.
+- A display-cache bug was found: correction D stored the names, but `11月_見やすい` D used an indirect formula through monthly R and remained stale. The `sync_visible_business_candidates()` helper now directly references correction F (priority) then D for known generated display formulas, never for user-custom ones. The saved private annual file contains 6 visible review candidates, verified with reread SHA256 `e2d2e53e9aee78064dc65c1403675f71993378e245de1d6c60d43aa0db6a01a7`, Drive ID `1NYdq8hTk2bA26VhbBO0J7-ZYaVif7chm`.
+- None of these six points has a confirmed store visit. OSM data can have omissions, inaccurate point locations and nearby businesses; the system must not silently select among multiple names.
+- Existing daily 9AM scheduled ChatGPT task is still unverified; a successful manual pipeline run is **not** evidence of scheduled execution.

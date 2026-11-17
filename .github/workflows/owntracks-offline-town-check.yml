@@ -1,0 +1,59 @@
+name: OwnTracks offline Japan town geocoder evaluation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'owntracks-receiver/geo/offline-rust/**'
+      - 'owntracks-receiver/geo/confirmed-stay-business-candidates.py'
+      - 'owntracks-receiver/geo/test-confirmed-stay-business-candidates.py'
+      - '.github/workflows/owntracks-offline-town-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  public-landmarks-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Check Rust compiler version
+        run: rustc --version && cargo --version
+      - name: Build and test offline town lookup with public stations only
+        run: cargo test --manifest-path owntracks-receiver/geo/offline-rust/Cargo.toml --release
+      - name: Exercise offline CLI on one public station
+        run: |
+          printf '%s' '{"lat":35.6812,"lon":139.7671}' | \
+            cargo run --quiet --release --manifest-path owntracks-receiver/geo/offline-rust/Cargo.toml
+      - name: Test Node adapter without external network
+        run: node --test owntracks-receiver/geo/offline-town-provider.test.mjs
+      - name: Connect Node adapter to the compiled offline binary using public Tokyo Station only
+        run: |
+          node --input-type=module -e '
+          import {resolve} from "node:path";
+          import {strict as assert} from "node:assert";
+          import {suggestTownOffline} from "./owntracks-receiver/geo/offline-town-provider.mjs";
+          const result = await suggestTownOffline(
+            {eventId:"publictokyo001",lat:35.6812,lon:139.7671,accuracyMeters:5},
+            {enabled:true,approvedPrivateRuntime:true,
+              binaryPath:resolve("owntracks-receiver/geo/offline-rust/target/release/miya-offline-japan-town-geocoder")});
+          assert.equal(result.status,"automatic_candidate_unverified");
+          assert.ok(result.addressCandidate.startsWith("東京都千代田区丸の内"));
+          assert.equal(result.facilityCandidate,"");
+          console.log("Node-to-private-binary lookup succeeded on fixed public Tokyo Station only");
+          '
+      - name: Save public-data-only geocoder executable for private runtime evaluation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: miya-offline-town-geocoder-linux
+          path: owntracks-receiver/geo/offline-rust/target/release/miya-offline-japan-town-geocoder
+          retention-days: 1
+          if-no-files-found: error
+      - name: Check annual offline Excel updater Python syntax
+        run: python3 -m py_compile owntracks-receiver/geo/annual-offline-town-update.py owntracks-receiver/geo/import-owntracks-day-into-annual.py owntracks-receiver/geo/run-private-diary-sync.py owntracks-receiver/geo/test-run-private-diary-sync.py owntracks-receiver/geo/test-import-owntracks-day-into-annual.py owntracks-receiver/geo/verify-diary-delta.py owntracks-receiver/geo/test-verify-diary-delta.py owntracks-receiver/geo/write-private-sync-receipt.py owntracks-receiver/geo/test-write-private-sync-receipt.py owntracks-receiver/geo/confirmed-stay-business-candidates.py owntracks-receiver/geo/test-confirmed-stay-business-candidates.py
+      - name: Test private sync receipt validation (synthetic data only)
+        run: python3 owntracks-receiver/geo/test-write-private-sync-receipt.py
+      - name: Confirm no application secrets are present
+        run: echo 'Only fixed public railway stations are used in this evaluation; no live user GPS files are read.'

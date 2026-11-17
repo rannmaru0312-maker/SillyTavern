@@ -1,0 +1,52 @@
+name: OwnTracks public Kansai OSM POI catalog (no user GPS)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'owntracks-receiver/geo/build-public-poi-catalog.py'
+      - '.github/workflows/owntracks-public-poi-catalog.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  public-poi-catalog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Checkout safe public code only
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Check Python source syntax
+        run: python3 -m py_compile owntracks-receiver/geo/build-public-poi-catalog.py owntracks-receiver/geo/offline-poi-candidates.py owntracks-receiver/geo/test-offline-poi-candidates.py
+      - name: Install public OSM tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
+      - name: Download public Kansai extract (fixed region; never GPS-derived)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/osm-public
+          curl --fail --show-error --silent --location --retry 2 --connect-timeout 20 --max-time 900 \
+            'https://download.geofabrik.de/asia/japan/kansai-latest.osm.pbf' \
+            --output /tmp/osm-public/kansai.osm.pbf
+          test "$(stat -c %s /tmp/osm-public/kansai.osm.pbf)" -gt 100000000
+      - name: Extract only public named POI nodes
+        run: |
+          set -euo pipefail
+          osmium tags-filter -R /tmp/osm-public/kansai.osm.pbf n/shop n/amenity n/tourism \
+            -o /tmp/osm-public/poi-only.osm.pbf
+          osmium export /tmp/osm-public/poi-only.osm.pbf -f geojsonseq -a type,id \
+            -o /tmp/osm-public/poi.geojsonseq
+          python3 owntracks-receiver/geo/build-public-poi-catalog.py \
+            --input /tmp/osm-public/poi.geojsonseq \
+            --output /tmp/osm-public/kansai-public-poi.ndjson \
+            --snapshot-date "$(date -u +%F)"
+          test "$(wc -l </tmp/osm-public/kansai-public-poi.ndjson)" -gt 100
+      - name: Save PUBLIC OSM catalog only (ODbL attribution inside)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: kansai-public-osm-poi-nodes
+          path: /tmp/osm-public/kansai-public-poi.ndjson
+          retention-days: 2
+          if-no-files-found: error
+      - name: Privacy declaration
+        run: echo 'No user GPS, diary, home, workplace, client, location query or credentials are accessed or uploaded.'
