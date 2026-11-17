@@ -69,4 +69,15 @@ class TestPoi(unittest.TestCase):
   bad['properties']['name']='=HYPERLINK("bad","x")'
   self.geo.write_text('\x1e'+json.dumps(bad)+'\n',encoding='utf-8')
   x=self.build();self.assertEqual(x['public_named_nodes'],0)
+ def test_ambiguous_review_shortlist_is_not_confirmed(self):
+  feature=json.loads(self.geo.read_text(encoding='utf-8').split('\x1e')[1].strip())
+  feature['properties']['@id']=999;feature['properties']['name']='別の架空店舗';feature['geometry']['coordinates']=[135.00008,34.0]
+  with self.geo.open('a',encoding='utf-8') as f:f.write('\x1e'+json.dumps(feature)+'\n')
+  self.build();r=private.run(self.src,self.cat,self.out,allow_review_shortlists=True)
+  self.assertEqual((r['candidate_count'],r['review_shortlists']), (1,1))
+  w=SpreadsheetFile.import_xlsx(Blob.load(str(self.out)))
+  c=w.worksheets.get_item('店舗名の修正')
+  self.assertIn('要確認',c.get_range('D5').values[0][0])
+  self.assertIsNone(c.get_range('F5').values[0][0])
+  self.assertIn('入店未確定',c.get_range('P5').values[0][0])
 if __name__=='__main__':unittest.main(verbosity=2)
