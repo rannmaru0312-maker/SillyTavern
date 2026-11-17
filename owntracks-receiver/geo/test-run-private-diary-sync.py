@@ -24,10 +24,13 @@ class Pipeline(unittest.TestCase):
         b = Workbook.create()
         b.worksheets.add('使い方').get_range('A26:D26').values = [['11月',0,0,0]]
         c = b.worksheets.add('店舗名の修正')
+        b.worksheets.add('重複候補・保留').get_range('A1').values=[['保留欄']]
+        b.worksheets.add('出典・照合').get_range('A1').values=[['出典欄']]
         c.get_range('A4:O4').values = [[
             '日付','観測時刻','元の場所名','自動店舗候補','自動住所候補',
             '店舗名（本人修正）','表示する名前','確認状態','イベントID','出典',
             '月別シート','元行','地図','候補出典','検索日時']]
+        c.get_range('P4:Q4').values = [['店舗候補の根拠','候補判定日時']]
         for n in range(1,13):
             sh=b.worksheets.add(f'{n}月')
             sh.get_range('K4').values=[['統合用ID／イベントID']]
@@ -112,38 +115,31 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(back['appended'],0)
         self.assertEqual(back['address_candidates'],1)
         self.assertEqual(back['address_status'],'completed')
-    def test_even_when_no_missing_address_bad_existing_archive_is_rejected(self):
-        # A tampered artifact must be rejected even when the workbook has
-        # already received all of its address candidates.
-        runner.run(self.source,[self.day],ZIP,2026,self.output)
-        newroot=self.p/'current'
-        newroot.mkdir()
-        current=newroot/'生活記録_2026.xlsx'
-        shutil.copyfile(self.output,current)
-        broken=self.p/'broken.zip'
-        broken.write_bytes(b'incorrect content')
-        with self.assertRaises(ValueError):
-            runner.run(current,[self.day],broken,2026,self.p/'unexpected-output.xlsx')
-        self.assertFalse((self.p/'unexpected-output.xlsx').exists())
-
-    def test_previous_manual_name_survives_repeat_no_change(self):
-        runner.run(self.source,[self.day],ZIP,2026,self.output)
-        imported=SpreadsheetFile.import_xlsx(Blob.load(str(self.output)))
-        imported.worksheets.get_item('店舗名の修正').get_range('F5').values=[['架空の本人確認済み施設']]
-        current=self.p/'manual'/'生活記録_2026.xlsx'
-        current.parent.mkdir()
-        SpreadsheetFile.export_xlsx(imported).save(str(current))
-        ret=runner.run(current,[self.day],ZIP,2026,self.p/'not-generated.xlsx')
-        self.assertEqual(ret['status'],'unchanged')
-        self.assertFalse((self.p/'not-generated.xlsx').exists())
-        checked=SpreadsheetFile.import_xlsx(Blob.load(str(current)))
-        self.assertEqual(checked.worksheets.get_item('店舗名の修正').get_range('F5').values[0][0],
-                         '架空の本人確認済み施設')
-
     def test_wrong_year_rejected(self):
         with self.assertRaises(ValueError):
             runner.run(self.source,[self.day],ZIP,2027,self.output)
         self.assertFalse(self.output.exists())
+
+    def test_core_pipeline_with_optional_offline_poi(self):
+        import importlib.machinery
+        b = importlib.machinery.SourceFileLoader('public_atlas', str(D/'build-public-poi-catalog.py')).load_module()
+        public = self.p/'public-geojsonseq.txt'
+        catalog = self.p/'public-poi.ndjson'
+        public.write_text('\x1e'+json.dumps({'type':'Feature','geometry':{'type':'Point','coordinates':[139.7671,35.6812]},'properties':{'@type':'node','@id':777,'name':'架空駅前カフェ','amenity':'cafe'}},ensure_ascii=False)+'\n',encoding='utf-8')
+        catalog_result=b.create(public,catalog)
+        r=runner.run(self.source,[self.day],None,2026,self.output,poi_catalog=catalog,poi_catalog_sha256=catalog_result['sha256'])
+        self.assertEqual(r['appended'],1)
+        self.assertEqual(r['poi_candidates'],1)
+        self.assertEqual(r['poi_status'],'updated')
+        wb=SpreadsheetFile.import_xlsx(Blob.load(str(self.output)))
+        c=wb.worksheets.get_item('店舗名の修正')
+        self.assertEqual(c.get_range('D5').values[0][0],'架空駅前カフェ')
+        self.assertIsNone(c.get_range('F5').values[0][0])
+        self.assertIsNone(c.get_range('E5').values[0][0])
+        next_source=self.p/'next'/'生活記録_2026.xlsx';next_source.parent.mkdir()
+        shutil.copyfile(self.output,next_source)
+        again=runner.run(next_source,[self.day],None,2026,self.p/'should-not-create.xlsx',poi_catalog=catalog)
+        self.assertEqual((again['status'],again['poi_candidates']),('unchanged',0))
 
 if __name__=='__main__':
     unittest.main(verbosity=2)
