@@ -80,4 +80,22 @@ class TestPoi(unittest.TestCase):
   self.assertIn('要確認',c.get_range('D5').values[0][0])
   self.assertIsNone(c.get_range('F5').values[0][0])
   self.assertIn('入店未確定',c.get_range('P5').values[0][0])
+ def test_visible_view_repair_and_manual_priority(self):
+  self.build()
+  w=SpreadsheetFile.import_xlsx(Blob.load(str(self.src)))
+  v=w.worksheets.add('11月_見やすい')
+  v.get_range('A4:F4').values=[['日付','開始時間','終了時間','店舗名・店舗候補','住所候補','マップ']]
+  v.get_range('D5').formulas=[["=IF('11月'!A5=\"\",\"\",IF(AND('11月'!R5<>\"\",'11月'!R5<>\"未登録\"),'11月'!R5,'11月'!E5))"]]
+  v.get_range('A5').formulas=[["='11月'!A5"]]
+  SpreadsheetFile.export_xlsx(w).save(str(self.p/'withview.xlsx'))
+  r=private.run(self.p/'withview.xlsx',self.cat,self.out)
+  self.assertEqual((r['candidate_count'],r['visible_repaired']),(1,1))
+  checked=SpreadsheetFile.import_xlsx(Blob.load(str(self.out)))
+  actual=checked.worksheets.get_item('11月_見やすい').get_range('D5').values[0][0]
+  self.assertEqual(actual,'架空喫茶あおい')
+  manual=self.p/'manual_view.xlsx'
+  checked.worksheets.get_item('店舗名の修正').get_range('F5').values=[['本人が確認した店舗']]
+  SpreadsheetFile.export_xlsx(checked).save(str(manual))
+  current=SpreadsheetFile.import_xlsx(Blob.load(str(manual)))
+  self.assertEqual(current.worksheets.get_item('11月_見やすい').get_range('D5').values[0][0],'本人が確認した店舗')
 if __name__=='__main__':unittest.main(verbosity=2)
