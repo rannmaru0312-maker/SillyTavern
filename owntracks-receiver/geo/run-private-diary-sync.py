@@ -32,7 +32,9 @@ def _sha(path: Path) -> str:
 
 
 def run(source: Path, daily_files: list[Path], binary_zip: Path, year: int, output: Path,
-        *, town_limit: int = 120, max_files: int = 31) -> dict:
+        *, town_limit: int = 120, max_files: int = 31,
+        poi_catalog: Path | None = None, poi_catalog_sha256: str | None = None,
+        poi_review_shortlists: bool = False) -> dict:
     source, output = Path(source), Path(output)
     binary_zip = Path(binary_zip) if binary_zip is not None else None
     if source.resolve() == output.resolve() or not source.is_file():
@@ -41,6 +43,11 @@ def run(source: Path, daily_files: list[Path], binary_zip: Path, year: int, outp
         raise ValueError('wrong annual source')
     if len(daily_files) > max_files or max_files > 366 or not 1 <= town_limit <= 200:
         raise ValueError('unbounded work')
+    poi_catalog = Path(poi_catalog) if poi_catalog is not None else None
+    if poi_catalog_sha256 is not None and poi_catalog is None:
+        raise ValueError('catalog hash specified without catalog')
+    if poi_catalog is not None and not poi_catalog.is_file():
+        raise ValueError('requested POI catalog unavailable')
     # The pipeline may import verified GPS data even if the optional offline
     # binary is temporarily unavailable; address completion is reported as deferred.
     # A PRESENT but tampered archive is rejected by the updater (fail closed).
@@ -68,6 +75,8 @@ def run(source: Path, daily_files: list[Path], binary_zip: Path, year: int, outp
     inputs.sort(key=lambda e: e[0])
     initial_sha = _sha(source)
     day_digests = {date: _sha(path) for date, path in inputs}
+    catalog_digest = _sha(poi_catalog) if poi_catalog is not None else None
+    poi_result={'status':'not_configured','candidate_count':0,'ambiguous_held':0}
     appended, processed = 0, 0
     town_result = {'status': 'unchanged', 'updated_rows': 0, 'held_rows': 0,
                    'unmatched_rows': 0, 'remaining': None}
@@ -92,25 +101,45 @@ def run(source: Path, daily_files: list[Path], binary_zip: Path, year: int, outp
             elif town_result['status'] != 'unchanged':
                 raise ValueError('unexpected offline lookup result')
             address_status = 'completed'
+        # Verify the core GPS / address changes *before* adding optional POI names.
+        # The historic 12-month verifier intentionally forbids business candidate
+        # changes; the offline POI updater has its own strict protected-field check.
         if initial_sha != _sha(source) or any(_sha(path) != day_digests[date] for date, path in inputs):
+            raise ValueError('input changed during validation')
+        if latest != source:
+            report = integrity.verify(source, latest, year)
+            if report['new_gps'] != appended:
+                raise ValueError('unverified GPS row count')
+            if report['new_address_candidates_on_existing_rows'] > town_result['updated_rows']:
+                raise ValueError('unverified address changes')
+        if poi_catalog is not None:
+            poi = _load('owntracks_private_poi', 'offline-poi-candidates.py')
+            candidate_path=tmp / 'poi-enriched.xlsx'
+            poi_result=poi.run(latest,poi_catalog,candidate_path,
+                               expected_catalog_sha256=poi_catalog_sha256,
+                               allow_review_shortlists=poi_review_shortlists)
+            if poi_result['status']=='updated':
+                latest=candidate_path
+            elif poi_result['status'] not in ('unchanged','no_public_poi_data'):
+                raise ValueError('unexpected POI enrichment result')
+        if (initial_sha != _sha(source) or
+            any(_sha(path) != day_digests[date] for date, path in inputs) or
+            (poi_catalog is not None and _sha(poi_catalog)!=catalog_digest)):
             raise ValueError('input changed during validation')
         if latest == source:
             return {
                 'status': 'unchanged', 'year': year, 'processed_days': processed,
                 'appended': 0, 'address_candidates': 0,
                 'address_status': address_status,
+                'poi_status': poi_result['status'],
+                'poi_candidates': poi_result['candidate_count'],
+                'poi_review_shortlists': poi_result.get('review_shortlists',0),
                 'address_held': town_result.get('held_rows', 0),
                 'address_unmatched': town_result.get('unmatched_rows', 0),
                 'remaining': town_result.get('remaining', 0),
                 'output_created': False, 'source_sha256': initial_sha,
             }
-        # Verify the entire historical workbook, formula links, manual edits and
-        # allowed per-month counters before any candidate is committed.
-        report = integrity.verify(source, latest, year)
-        if report['new_gps'] != appended:
-            raise ValueError('unverified GPS row count')
-        if report['new_address_candidates_on_existing_rows'] > town_result['updated_rows']:
-            raise ValueError('unverified address changes')
+        # Both core ingestion and POI-only proposals were separately validated.
         # Do not leave a misleading output from a previous execution.
         if output.exists():
             raise ValueError('destination already exists')
@@ -130,6 +159,10 @@ def run(source: Path, daily_files: list[Path], binary_zip: Path, year: int, outp
         'appended': appended,
         'address_candidates': town_result['updated_rows'],
         'address_status': address_status,
+        'poi_status': poi_result['status'],
+        'poi_candidates': poi_result['candidate_count'],
+        'poi_review_shortlists': poi_result.get('review_shortlists',0),
+        'poi_ambiguous_held':poi_result.get('ambiguous_held',0),
         'address_held': town_result['held_rows'],
         'address_unmatched': town_result['unmatched_rows'],
         'remaining': town_result['remaining'],
@@ -147,10 +180,15 @@ def main() -> int:
     p.add_argument('--year', type=int, required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--town-limit', type=int, default=120)
+    p.add_argument('--poi-catalog', type=Path, default=None)
+    p.add_argument('--poi-catalog-sha256', type=str, default=None)
+    p.add_argument('--poi-review-shortlists', action='store_true')
     a = p.parse_args()
     try:
         result = run(a.source, a.daily_json, a.binary_zip, a.year, a.output,
-                     town_limit=a.town_limit)
+                     town_limit=a.town_limit, poi_catalog=a.poi_catalog,
+                     poi_catalog_sha256=a.poi_catalog_sha256,
+                     poi_review_shortlists=a.poi_review_shortlists)
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except Exception:
