@@ -1,6 +1,6 @@
 # MIYA & KOHARU — Offline public OSM POI catalog (2026-11-17)
 
-**Status:** Code and synthetic 8-case tests passed; private actual annual workbook schema tested with an unrelated public synthetic POI (0 changes). **Not yet production-deployed.** Real Kansai OSM catalog creation must be confirmed from CI artifact before testing actual names, and the scheduled job must be separately wired and verified.
+**Status:** Code and synthetic 9-case tests passed; private actual annual workbook schema tested with an unrelated public synthetic POI (0 changes). **Not yet production-deployed.** Real Kansai OSM catalog creation must be confirmed from CI artifact before testing actual names, and the scheduled job must be separately wired and verified.
 
 ## Public dataset acquisition: no private GPS in GitHub
 
@@ -28,3 +28,11 @@ Only named shop/amenity/tourism nodes are included initially. OSM ways (building
 ```sh
 python3 test-offline-poi-candidates.py
 ```
+
+## 2026-11-17 actual private readback verification
+
+- Public Kansai node POI catalog built successfully in GitHub Actions run 44078877943: 141,260 named POI nodes; SHA256 `ee4b28c94ab7c72693ca98d9df680e6227da8c71227de1eae25f3599ba537a04`; privately stored as Drive ID `17dCSys_xRvu-MXFMllvZr0OHLhY5YF9Z`.
+- With actual private GPS, 91 events were eligible for scanning and 6 records had **multiple nearby public storefront names**, no single reliable winner. Stored as `周辺候補（要確認）：...` in the private annual workbook; manual F remains authoritative.
+- A display-cache bug was found: correction D stored the names, but `11月_見やすい` D used an indirect formula through monthly R and remained stale. The `sync_visible_business_candidates()` helper now directly references correction F (priority) then D for known generated display formulas, never for user-custom ones. The saved private annual file contains 6 visible review candidates, verified with reread SHA256 `e2d2e53e9aee78064dc65c1403675f71993378e245de1d6c60d43aa0db6a01a7`, Drive ID `1NYdq8hTk2bA26VhbBO0J7-ZYaVif7chm`.
+- None of these six points has a confirmed store visit. OSM data can have omissions, inaccurate point locations and nearby businesses; the system must not silently select among multiple names.
+- Existing daily 9AM scheduled ChatGPT task is still unverified; a successful manual pipeline run is **not** evidence of scheduled execution.
